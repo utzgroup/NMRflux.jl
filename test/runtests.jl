@@ -1,0 +1,37 @@
+using NMRflux
+using Test
+
+
+@testset "SpectData basics" begin
+    
+    # construction
+    d = NMRflux.SpectData(ones(45,45,45),(range(0.0,1.0,45),range(1.0,2.0,45),range(2.0,3.0,45)))
+    
+    # slicing
+    @test typeof(d[:,1,1]) == NMRflux.SpectData{Float64,1}
+
+end
+
+@testset "NMRflux.jl FileIO" begin
+    # Write your tests here.
+   
+    ex=NMRflux.Examples.Data["HCC cell culture media spectra"]["files"][1]
+    params,d=NMRflux.load(ex,:Bruker)
+
+    @test size(d) == size(d.coord[1])
+    @test isapprox(2.616357072520625e11 + 1.335611666755e11im,sum(d))
+end
+
+@testset "NMRflux.jl processing" begin
+    # Write your tests here.
+    ex=NMRflux.Examples.Data["HCC cell culture media spectra"]["files"][1]
+    params,d=NMRflux.load(ex,:Bruker)
+    zf = ZeroFill([2^16])
+    ft = FourierTransform([2^16],[1])
+    pc = PhaseCorrect(0.80pi,2pi*0.00172,1)
+    bc = MedianBaselineCorrect(1,wdw=1024)
+    ftdat = d |> zf |> ft |> pc |> bc
+    @test size(ftdat) == size(ftdat.coord[1])
+end
+
+
