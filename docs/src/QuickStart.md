@@ -46,7 +46,7 @@ xlabel = "time / s",
 ylabel = "signal (a.u.)",
 title = "Bruker FID (real part)")
 
-savefig("quickstart_bruker_fid.svg"); nothing
+savefig("quickstart_bruker_fid.svg"); nothing # hide
 ```
 ![](quickstart_bruker_fid.svg)
 
@@ -77,7 +77,7 @@ N_new = max(N_orig, N_target)
 zf = ZeroFill([N_new])
 ap = Apodize([0.5]) # time domain exponential decay constant
 ft = FourierTransform([N_new], [1]; fftshift=true)
-pc = PhaseCorrect(0.0, 0.0, 1) # example values (ph0, ph1, dim)
+pc = PhaseCorrect(0.0, -0.01π, 1) # example values (ph0, ph1, dim)
 mbc = NMRflux.MedianBaselineCorrect(1; wdw=256)
 
 p = Chain(zf, ap, ft, pc, mbc) # The main processor
@@ -91,30 +91,11 @@ xlabel="frequency / Hz",
 ylabel="signal (a.u.)",
 title="Processed spectrum (ZF + AP + FT + PC + BC)")
 
-savefig("quickstart_processing_pipeline.svg"); nothing
+savefig("quickstart_processing_pipeline.svg"); nothing # hide
 ```
 ![](quickstart_processing_pipeline.svg)
 
-# 4. Synthetic data (SpinSim / GenerateFIDs)
-`NMRflux.jl` includes:
-- `SpinSim`: a lightweight Hilbert space simulator for spin dynamics
-- `GenerateFIDs`: a user facing module that generates paired clean/dirty synthetic signals via a TOML configuration
-
-Synthetic batches follow the pairing convention:
-rows 1, 3, 5, ... are clean
-rows 2, 4, 6, ... are the corresponding dirty
-
-```@julia
-using NMRflux
-using NMRflux.GenerateFIDs
-
-toml_file = joinpath(@DIR, "..", "examples", "synthetic", "Batch16k.toml")
-
-batch_td = GenerateFIDs.generateBatch(toml_file; saveFile=false)
-size(batch_td.dat) # (2*nbatch, TD)
-```
-
-# 5. Toy deep learning example (SpectData + Flux)
+# 4. Toy deep learning example (SpectData + Flux)
 We generate a target spectrum using NMRflux's classical baseline correction, then train a small Flux model to approximate this mapping. This demonstrates seamless interoperability between `SpectData`, `NMRflux` processing pipelines, and `Flux` models. This toy example demonstrates end-to-end compatibility between:
 - `SpectData` (data container)
 - `NMRflux` processing tools (FFT pipeline)

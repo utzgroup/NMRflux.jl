@@ -6,7 +6,7 @@
 # Project:             NMRflux.jl - NMR Processing, Simulation, and ML Tools
 # Author:              Manaz Kaleel
 # Created:             2025-11-24
-# Last Modified:       2026-01-12
+# Last Modified:       2026-06-10
 #
 # Description:
 #   This script builds the NMRflux.jl documentation using Documenter.jl.
@@ -32,14 +32,14 @@ makedocs(
     authors  = "Manaz Kaleel & Marcel Utz",
     clean    = true,
 
-    repo = Remotes.GitHub("marcel-utz", "NMRflux.jl"),
+    repo = Remotes.GitHub("utzgroup", "NMRflux.jl"),
 
     modules = [NMRflux],
 
     format = Documenter.HTML(
         prettyurls   = false,   # set to true later for GitHub Pages
         collapselevel = 2,
-        assets       = String[],
+        assets       = String[],        # Documenter default
     ),
 
     pages = [
@@ -54,7 +54,6 @@ makedocs(
             "SpectData" => "SpectData.md",
             "Data Processing" => "DataProcessing.md",
             "Spin Dynamics and FID generation" => "SpinDynamics.md",
-            "RINSE" => "RINSE.md",
         ],
 
         "Development" => [
@@ -74,7 +73,7 @@ makedocs(
 # Deploy docs needed when pushing to GitHub Pages
 # Uncomment when GitHub CI is set up:
 # deploydocs(
-#     repo   = "https://github.com/marcel-utz/NMRflux.jl.git",
+#     repo   = "https://github.com/utzgroup/NMRflux.jl.git",
 #     target = "build",
 # )
 # ------------------------------------------------------------------------------
