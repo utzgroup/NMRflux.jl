@@ -1,0 +1,3 @@
+module Craft
+
+end

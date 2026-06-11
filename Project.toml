@@ -6,6 +6,7 @@ authors = ["Marcel Utz <marcel.utz@gmx.net> and contributors"]
 [deps]
 Arpack = "7d9fca2a-8960-54d3-9f78-7d1dccf2cb97"
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
+DSP = "717857b8-e6f2-59f4-9121-6e50c889abd2"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
@@ -23,6 +24,7 @@ Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 
 [compat]
+DSP = "0.8.5"
 LinearAlgebra = "1.12.0"
 Optim = "2.0.1"
 julia = "1.6.7"

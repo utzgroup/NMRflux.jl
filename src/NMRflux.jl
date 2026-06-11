@@ -3,7 +3,7 @@ module NMRflux
     export SpectData,coords,load
     export NMRProcessor, Chain, FourierTransform, Apodize, ZeroFill, 
            PhaseCorrect, MedianBaselineCorrect, Derivative, Integral,
-           AutoPhaseCorrectChen,PeakAlign
+           AutoPhaseCorrectChen, PeakAlign, DigitalFilter
    
     export SpinSim
     export GISSMO

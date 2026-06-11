@@ -351,3 +351,49 @@ function (pa::PeakAlign)(spect::SpectData{T,1}) where {T<:Number}
     newdat = circshift(spect.dat, idx-maxidx)
     return SpectData(newdat, (spect.coord[1],))
 end
+
+struct DigitalFilter <: NMRProcessor1D
+    b::Vector{ComplexF64}
+    # a::Vector{Float64}
+    dim::Int64
+end
+
+import DSP
+
+function (df::DigitalFilter)(spect::SpectData{T,1}) where {T<:Number}
+    newdat = DSP.filt(df.b, spect.dat)
+    return SpectData(newdat, (spect.coord[1],))
+end
+
+@doc raw"""
+    function BandReject(lf::Float64, hf::Float64, n::Integer)
+
+returns the coeffiecients of a  digital band-rejection filter with lower and upper cutoff frequencies `lf`
+and `hf`, respectively, and filter order `n`. 
+The frequencies are given as a fraction of the spectral width. 
+The filter is designed using the
+window method, with a Blackman window. The returned filter coefficients can be
+used to create a `DigitalFilter` processor. 
+"""
+function BandReject(lf,hf,n)
+   b = [ t == 0 ? -ComplexF64(hf-lf,0.0) : 1.0/(2pi*im*t)*(exp(2pi*im*lf*t)-exp(2pi*im*hf*t)) for t=-n:n ]
+   b .*= 0.42 .- 0.5*cos.(pi/n*(0:2n)) .+ 0.08*cos.(2pi/n*(0:2n))
+   b[n+1] += ComplexF64(1.0,0.0)
+   return b
+end
+
+@doc raw"""
+    function BandPass(lf::Float64, hf::Float64, n::Integer)
+
+returns the coeffiecients of a  digital band-pass filter with lower and upper cutoff frequencies `lf`
+and `hf`, respectively, and filter order `n`. 
+The frequencies are given as a fraction of the spectral width. 
+The filter is designed using the
+window method, with a Blackman window. The returned filter coefficients can be
+used to create a `DigitalFilter` processor. 
+"""
+function BandPass(lf,hf,n)
+   b = -[ t == 0 ? -ComplexF64(hf-lf,0.0) : 1.0/(2pi*im*t)*(exp(2pi*im*lf*t)-exp(2pi*im*hf*t)) for t=-n:n ]
+   b .*= 0.42 .- 0.5*cos.(pi/n*(0:2n)) .+ 0.08*cos.(2pi/n*(0:2n))
+   return b
+end
