@@ -96,9 +96,9 @@ end
 end
 
 # ---------------------------------------------------------------------------
-# 4. FileIO — JEOL
+# 4. FileIO — JEOL 1D
 # ---------------------------------------------------------------------------
-@testset "FileIO JEOL" begin
+@testset "FileIO JEOL 1D" begin
     params, d = NMRflux.load(jeol_file(), :JEOL)
 
     @test isa(params, Dict)
@@ -109,6 +109,35 @@ end
     @test length(d) > 0
 
     # data should be genuinely complex
+    @test norm(imag.(d.dat)) > 0.0
+end
+
+# ---------------------------------------------------------------------------
+# 4b. FileIO — JEOL 2D (SH3 HSQC)
+# ---------------------------------------------------------------------------
+@testset "FileIO JEOL 2D" begin
+    # The HSQC is the first file in the SH3 example set
+    hsqc_file = NMRflux.Examples.Data["SH3 domain HSQC"]["files"][1]
+    params, d = NMRflux.load(hsqc_file, :JEOL)
+
+    # Should be a 2D SpectData
+    @test isa(d, NMRflux.SpectData{ComplexF64,2})
+
+    # Shape: 1280 direct (¹H) × 256 indirect (¹⁵N)
+    @test size(d) == (1280, 256)
+    @test size(d) == (length(coords(d,1)), length(coords(d,2)))
+
+    # Both axes are time-domain: start at 0, end > 0
+    @test first(coords(d,1)) == 0.0
+    @test last(coords(d,1))  >  0.0
+    @test first(coords(d,2)) == 0.0
+    @test last(coords(d,2))  >  0.0
+
+    # Direct axis (¹H at 600 MHz) acquisition time ≈ 0.170 s
+    @test isapprox(last(coords(d,1)), 0.17046512; rtol=1e-4)
+
+    # Data is genuinely complex in both real and imaginary parts
+    @test norm(real.(d.dat)) > 0.0
     @test norm(imag.(d.dat)) > 0.0
 end
 
