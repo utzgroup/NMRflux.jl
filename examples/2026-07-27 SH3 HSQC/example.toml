@@ -1,0 +1,19 @@
+name    =   "SH3 domain HSQC"
+format  =   "JEOL"
+tags    =   ["protein NMR", "HSQC", "15N", "2D", "structural biology"]
+author  =   "Marcel Utz"
+reference = "unpublished"
+doi = ""
+description = """
+15N-labelled SH3 domain measured on a JEOL 600 MHz instrument.
+Contains a 1D 1H reference spectrum, a full 2D 1H-15N HSQC
+(1280 × 256 complex points, decoupled), and a 2D SOFAST-HMQC.
+Two calibration echo spectra (E1d, E2d) are also included.
+
+Files:
+  _1d_1h_wg        — 1D 1H water-gated spectrum (1D, Complex)
+  _15n_hsqc_dec_pn — 2D 1H-15N HSQC, decoupled (2D, 1280×256 Complex×Complex)
+  _het_sofast_hmqc_pfg — 2D SOFAST-HMQC (2D, 1392×24 Complex×Complex)
+  _E1d_15nhsqc_wg  — 1D echo calibration (1D)
+  _E2d_15nhsqc_wg  — 2D echo calibration (2D, 640×8)
+"""
