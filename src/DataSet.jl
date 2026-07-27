@@ -107,11 +107,9 @@ function load(f::String,vendor::Symbol)
     elseif vendor == :JEOL
         io = open(f,"r")
         header,params,data = FileIO.readJEOL(io)
-        n=length(data)
-        cdata = data[1:n>>1] - im*data[n>>1+1:end]
-        tcoord=range(0.0,step=1.0/params["X_SWEEP"][3],length=length(cdata))
         close(io)
-        return params, SpectData(cdata,(tcoord,))
+        arr, coords = FileIO.reshapeJEOL(header, params, data)
+        return params, SpectData(arr, coords)
     else 
         error("Unsupported data format")
     end

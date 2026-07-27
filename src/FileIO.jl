@@ -391,44 +391,83 @@ function readJEOL(s::IOStream)
     return header,param,data
 end
 
-@doc """
-  function reshapeJEOL(header,params,data<:AbstractArray)
+@doc raw"""
+    function reshapeJEOL(header, params, data)
 
-uses the header and parameter data to reshape the data. Returns an Array
-with the correctly shaped data. 
+Reshape the flat data vector from `readJEOL` into a `SpectData` object with the
+correct dimensionality and coordinate axes.
 
-!!! warning "Not implemented yet!"
-    This function is not yet implemented. It will rely on the new data type,
-    and will return a valid `SpectData` array, including the correct
-    axes and coordinate information.
+The number of NMR dimensions is read from `header["dims"]`. For each active
+axis, `header["dataAxisType"]` determines how many data sections are present:
+
+| Axis type        | Sections      |
+|------------------|---------------|
+| `"Real"`         | ×1 (no imaginary) |
+| `"Complex"`      | ×2 (real + imaginary stored as separate blocks) |
+| `"Real_Complex"` | ×2 (treated identically to Complex) |
+| `"TPPI"`         | ×1 (caller applies TPPI processing after loading) |
+
+Sections are stored sequentially in the flat buffer. The section index
+(0-based) is a bitmask encoding which axes are imaginary, with the **direct
+axis (axis 1) in bit 0**:
+
+- 1-D Complex: sections [R, I]
+- 2-D Complex×Complex: sections [RR, IR, RI, II]
+
+Sign convention: imaginary sections are combined with a factor of `-im`
+(JEOL conjugate convention, consistent with the existing 1-D inline loader).
+
+Coordinate axes are built from `header["dataAxisStart"]` and
+`header["dataAxisStop"]` paired with `header["dataPoints"]`.
+
+!!! note "2-D section ordering"
+    The ordering (RR, IR, RI, II) has not yet been verified against a real 2-D
+    JEOL dataset. If the indirect-dimension spectrum appears mirrored after FT,
+    swap the two middle sections by reversing the bit-index convention below.
 """
-function reshapeJEOL(header,params,data)
-  error("not implemented yet")
-  data = nothing
-  dataSectionCount=1
-  realComplex = false
+function reshapeJEOL(header, params, data)
+    ndims  = header["dims"]
+    npts   = Int.(header["dataPoints"][1:ndims])
+    astart = header["dataAxisStart"][1:ndims]
+    astop  = header["dataAxisStop"][1:ndims]
+    types  = header["dataAxisType"][1:ndims]
 
-  for dat in header["dataAxisType"]
-    if dat=="Real_Complex" && !realComplex 
-      dataSectionCount++
-      realComplex=true
+    # Which axes contribute a separate imaginary section?
+    imag_axes  = findall(t -> t in ("Complex", "Real_Complex"), types)
+    nsections  = 2^length(imag_axes)
+    section_sz = prod(npts)
+
+    if length(data) != nsections * section_sz
+        error("JEOL data length mismatch: got $(length(data)) floats, " *
+              "expected $(nsections * section_sz) " *
+              "($(nsections) sections × $(section_sz) points/section). " *
+              "dataPoints=$(npts), dataAxisType=$(types)")
     end
-    if dat=="Complex"
-      dataSectionCount *= 2
+
+    # Split the flat buffer into equally-sized sections
+    secs = [data[(k-1)*section_sz+1 : k*section_sz] for k in 1:nsections]
+
+    # Combine sections into a complex N-D array.
+    # For section s (1-based), bits = s-1 encodes which axes are imaginary:
+    # bit (k-1) = 1 → imag_axes[k] contributes factor -im.
+    result = zeros(ComplexF64, npts...)
+    for s in 1:nsections
+        bits   = s - 1
+        factor = prod(
+            (bits >> (k-1)) & 1 == 1 ? (-im) : ComplexF64(1.0)
+            for k in 1:length(imag_axes);
+            init = ComplexF64(1.0)
+        )
+        result .+= factor .* reshape(secs[s], npts...)
     end
-  end
 
-  if header["dataFormat"]=="One_D"
-     if dataSectionCount == 1
-         data = [xtoh(read(s,header["dataType"])) for k=1:header["dataPoints"][1]]
-     end
-     if dataSectionCount == 2
-        rdata = [xtoh(read(s,header["dataType"])) for k=1:header["dataPoints"][1]]
-        idata = [xtoh(read(s,header["dataType"])) for k=1:header["dataPoints"][1]]
-        data = rdata + im*idata
-     end
-  end
+    # Coordinate range for each active axis (units as stored in the header,
+    # typically seconds for time-domain data).
+    # Return as (array, coords) so the caller (in NMRflux scope) can wrap
+    # the result in SpectData — FileIO does not import NMRflux types.
+    coords = tuple([range(astart[k], astop[k], npts[k]) for k in 1:ndims]...)
 
+    return result, coords
 end
 
 end # module FileIO
