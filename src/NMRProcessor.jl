@@ -227,7 +227,7 @@ end
 function (der::Derivative)(spect::SpectData{T,1}) where {T<:Number}
     s=spect.dat
     inc=step(spect.coord[1])
-    d = 1.0/12*(8*[s[2:end];0]-8*[0;s[1:(end-1)]] + [s[3:end];0;0] - [0;0;s[1:(end-2)]] )/inc
+    d = 1.0/12*(8*[s[2:end];0]-8*[0;s[1:(end-1)]] - [s[3:end];0;0] + [0;0;s[1:(end-2)]] )/inc
     return SpectData(d, spect.coord)
 end
 

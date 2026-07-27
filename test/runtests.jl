@@ -212,16 +212,12 @@ end
     # interior points should be essentially zero
     @test maximum(abs.(dv.dat[5:end-4])) < 1e-10
 
-    # derivative of a unit ramp: NOTE the stencil in Derivative uses
-    # (+s[i+2] - s[i-2]) instead of the correct (-s[i+2] + s[i-2]),
-    # which introduces a constant factor of 5/3 for linear inputs.
-    # The test below documents the actual (current) behaviour.
+    # derivative of a unit ramp is approximately 1.0 everywhere (interior)
     ramp = NMRflux.SpectData(collect(ComplexF64, range(0.0, 1.0, 200)),
                               (range(0.0, 1.0, 200),))
     dr = der(ramp)
     interior = real.(dr.dat[5:end-4])
-    expected_factor = 5.0/3.0   # arises from wrong sign on 2-step stencil terms
-    @test all(abs.(interior .- expected_factor) .< 0.01)
+    @test all(abs.(interior .- 1.0) .< 0.01)
 end
 
 # ---------------------------------------------------------------------------
