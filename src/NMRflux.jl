@@ -7,6 +7,7 @@ module NMRflux
    
     export SpinSim
     export GISSMO
+    export Craft
 
     include("DataSet.jl")
     include("Examples.jl")
@@ -14,5 +15,5 @@ module NMRflux
     include("FileIO.jl")
     include("SpinSim.jl")
     include("GISSMO.jl")
-
+    include("Craft.jl")
 end
