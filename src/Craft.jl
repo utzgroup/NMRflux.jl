@@ -3,6 +3,9 @@ module Craft
 using NMRflux
 using LinearAlgebra
 using LsqFit
+using DataFrames
+
+export analyze
 
 
 function esprit(x, K)
@@ -271,6 +274,38 @@ cf. `oscillators_fixed_freq` and `oscillators_fixed_freq_jacobian`.
 function fit_fid_fixed_freq(fid::SpectData{T,1}, freq_hz::Vector, decay_rate::Vector) where T
     fit, result = fit_fid_fixed_freq(fid.dat, NMRflux.coords(fid, 1), freq_hz, decay_rate)
     return fit, result
+end
+
+@doc raw"""
+      resonance_table(result::Dict)
+
+Convert the `result` dictionary returned by `fit_fid_fixed_freq` into a
+`DataFrame` with columns `frequency_hz`, `intensity`, `phase_rad` and
+`linewidth_hz`, one row per fitted resonance.
+"""
+function resonance_table(result::Dict)
+    resonances = result["resonances"]
+    return DataFrame(
+        frequency_hz = [r["frequency_hz"]  for r in resonances],
+        intensity    = [r["amplitude"]     for r in resonances],
+        phase_rad    = [r["phase_rad"]     for r in resonances],
+        linewidth_hz = [r["decay_rate_hz"] for r in resonances],
+    )
+end
+
+@doc raw"""
+      analyze(fid::SpectData{T,1}, K::Integer=150) where T
+
+Decompose an FID into a sum of damped sinusoids: estimate `K` resonance
+frequencies and decay rates via `esprit`, refine them with
+`fit_fid_fixed_freq`, and return the result as a `DataFrame` (see
+`resonance_table`) with columns `frequency_hz`, `intensity`, `phase_rad`
+and `linewidth_hz`.
+"""
+function analyze(fid::SpectData{T,1}, K::Integer=150) where T
+    freq_hz, decays, _ = esprit(fid, K)
+    _, result = fit_fid_fixed_freq(fid, freq_hz, decays)
+    return resonance_table(result)
 end
 
 
