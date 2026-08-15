@@ -213,7 +213,18 @@ end
 
 Fit a sum of $K$ damped complex exponentials with fixed frequencies to an FID
 `fid` sampled at times `r`. The frequencies are fixed at `freq_hz`, and the
-decay rates are initialised at `decay_rate` (in Hz). 
+decay rates are initialised at `decay_rate` (in Hz).
+
+Returns a `Dict` with keys:
+- `"n_oscillators"`   — $K$
+- `"residual"`        — sum of squared residuals of the fit
+- `"log_evidence"`    — Laplace approximation to the log-evidence (see `laplace_log_evidence`)
+- `"fit"`             — the underlying `LsqFit.LsqFitResult`, giving access to
+                         fit diagnostics such as confidence intervals
+- `"resonance_table"` — a `DataFrame`, sorted by frequency, with columns
+                         `frequency_hz`, `intensity`, `phase_rad` and `linewidth_hz`
+- `"resonances"`      — the same resonances as a vector of `Dict`s, each with keys
+                         `frequency_hz`, `amplitude`, `phase_rad`, `decay_rate_hz` and `T2_s`
 
 cf. `oscillators_fixed_freq` and `oscillators_fixed_freq_jacobian`.
 """
@@ -247,6 +258,13 @@ function fit_fid_fixed_freq(fid::AbstractVector{<:Complex}, r::StepRangeLen,
         "n_oscillators" => K,
         "residual"      => sum(fit.resid.^2),
         "log_evidence"  => laplace_log_evidence(fit),
+        "fit"            => fit,
+        "resonance_table" => DataFrame(
+            frequency_hz = freq_hz[idx],
+            intensity    = amplitude[idx],
+            phase_rad    = phase_rad[idx],
+            linewidth_hz = decay_rate_fit[idx] ./ (2π),
+        ),
         "resonances"    => [
             Dict(
                 "frequency_hz"  => freq_hz[i],
@@ -259,7 +277,7 @@ function fit_fid_fixed_freq(fid::AbstractVector{<:Complex}, r::StepRangeLen,
         ]
     )
 
-    return fit, result
+    return result
 end
 
 @doc raw"""
@@ -269,43 +287,31 @@ Fit a sum of $K$ damped complex exponentials with fixed frequencies to an FID
 `fid` sampled at times `r`. The frequencies are fixed at `freq_hz`, and the
 decay rates are initialised at `decay_rate` (in Hz).
 
+Returns the same `Dict` as `fit_fid_fixed_freq(fid::AbstractVector{<:Complex}, r, freq_hz, decay_rate)`
+— see that method's docstring for the list of keys.
+
 cf. `oscillators_fixed_freq` and `oscillators_fixed_freq_jacobian`.
 """
 function fit_fid_fixed_freq(fid::SpectData{T,1}, freq_hz::Vector, decay_rate::Vector) where T
-    fit, result = fit_fid_fixed_freq(fid.dat, NMRflux.coords(fid, 1), freq_hz, decay_rate)
-    return fit, result
-end
-
-@doc raw"""
-      resonance_table(result::Dict)
-
-Convert the `result` dictionary returned by `fit_fid_fixed_freq` into a
-`DataFrame` with columns `frequency_hz`, `intensity`, `phase_rad` and
-`linewidth_hz`, one row per fitted resonance.
-"""
-function resonance_table(result::Dict)
-    resonances = result["resonances"]
-    return DataFrame(
-        frequency_hz = [r["frequency_hz"]  for r in resonances],
-        intensity    = [r["amplitude"]     for r in resonances],
-        phase_rad    = [r["phase_rad"]     for r in resonances],
-        linewidth_hz = [r["decay_rate_hz"] for r in resonances],
-    )
+    result = fit_fid_fixed_freq(fid.dat, NMRflux.coords(fid, 1), freq_hz, decay_rate)
+    return result
 end
 
 @doc raw"""
       analyze(fid::SpectData{T,1}, K::Integer=150) where T
 
 Decompose an FID into a sum of damped sinusoids: estimate `K` resonance
-frequencies and decay rates via `esprit`, refine them with
-`fit_fid_fixed_freq`, and return the result as a `DataFrame` (see
-`resonance_table`) with columns `frequency_hz`, `intensity`, `phase_rad`
-and `linewidth_hz`.
+frequencies and decay rates via `esprit`, and refine them with
+`fit_fid_fixed_freq`.
+
+Returns the `Dict` produced by `fit_fid_fixed_freq` — see its docstring for
+the full list of keys. The resonance table and fit diagnostics of most
+interest are found under the `"resonance_table"` and `"fit"` keys, respectively.
 """
 function analyze(fid::SpectData{T,1}, K::Integer=150) where T
     freq_hz, decays, _ = esprit(fid, K)
-    _, result = fit_fid_fixed_freq(fid, freq_hz, decays)
-    return resonance_table(result)
+    result = fit_fid_fixed_freq(fid, freq_hz, decays)
+    return result 
 end
 
 
