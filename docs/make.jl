@@ -54,6 +54,8 @@ makedocs(
             "SpectData" => "SpectData.md",
             "Data Processing" => "DataProcessing.md",
             "Spin Dynamics and FID generation" => "SpinDynamics.md",
+            "RINSE" => "RINSE.md",
+            "Sinusoidal Decomposition (Craft)" => "Craft.md",
         ],
 
         "Development" => [
