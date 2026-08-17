@@ -40,6 +40,7 @@ t = data_td_joel.coord[1]
 y = real.(data_td_joel.dat)
 
 plot(t, y;
+xlims = [0,0.001],     
 xlabel = "time / s",
 ylabel = "signal (a.u.)",
 title = "JOEL FID (real part)")

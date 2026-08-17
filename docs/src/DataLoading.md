@@ -47,7 +47,7 @@ t = data_td_bruker.coord[1]
 y = real.(data_td_bruker.dat)
 
 plot(t, y, xlabel = "time / s", ylabel = "signal (a.u.)", title  = "Bruker FID (real part) - High level loading") # Plot the real part of the FID
-savefig("bruker_fid_hl_plot.svg"); nothing # Save figure for Documenter
+savefig("bruker_fid_hl_plot.svg"); nothing # hide
 ```
 ![](bruker_fid_hl_plot.svg)
 
@@ -98,7 +98,7 @@ time_axis = (0:length(fid_bruker)-1) .* dwell          # explicit time vector
 The same example can be used to quickly inspect the loaded FID:
 ```@example brukerEg
 plot(time_axis, real(fid_bruker), xlabel = "time / s", ylabel = "signal (a.u.)", title  = "Bruker FID (real part) - Low level loading") # Plot the real part of the FID
-savefig("bruker_fid_plot.svg"); nothing # Save figure for Documenter
+savefig("bruker_fid_plot.svg"); nothing # hide
 ```
 ![](bruker_fid_plot.svg)
 
@@ -126,7 +126,7 @@ xlabel = "time / s",
 ylabel = "signal (a.u.)",
 title = "JEOL FID (real part)")
 
-savefig("jeol_fid_plot.svg"); nothing
+savefig("jeol_fid_plot.svg"); nothing # hide
 ```
 ![](jeol_fid_plot.svg)
 

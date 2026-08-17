@@ -71,7 +71,7 @@ plot(tbl.frequency_hz, tbl.intensity, seriestype = :sticks, marker = :circle,
      xlabel = "frequency (Hz)", ylabel = "intensity (a.u.)",
      title = "Craft.analyze resonance table")
 
-savefig("craft_resonance_sticks.svg"); nothing
+savefig("craft_resonance_sticks.svg"); nothing # hide
 ```
 ![](craft_resonance_sticks.svg)
 

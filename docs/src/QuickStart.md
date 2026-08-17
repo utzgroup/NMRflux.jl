@@ -11,7 +11,7 @@ To install the package from GitHub:
 
 ```@julia
 import Pkg
-Pkg.add(url = "https://github.com/marcel-utz/NMRflux.jl.git")
+Pkg.add(url = "https://github.com/utzgroup/NMRflux.jl.git")
 ```
 
 Once installation is complete:

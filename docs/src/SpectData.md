@@ -29,7 +29,7 @@ xlabel = "time / s",
 ylabel = "signal (a.u.)",
 title = "JEOL FID (real part)")
 
-savefig("jeol_fid_plot.svg"); nothing
+savefig("jeol_fid_plot.svg"); nothing # hide
 ```
 ![](jeol_fid_plot.svg)
 

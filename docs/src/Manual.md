@@ -6,7 +6,7 @@ To install the package from GitHub:
 
 ```@julia
 import Pkg
-Pkg.add(url = "https://github.com/marcel-utz/NMRflux.jl.git")
+Pkg.add(url = "https://github.com/utzgroup/NMRflux.jl.git")
 ```
 
 Once installation is complete:
@@ -64,7 +64,7 @@ t = data_td_bruker.coord[1]
 y = real.(data_td_bruker.dat)
 
 plot(t, y, xlabel = "time / s", ylabel = "signal (a.u.)", title  = "Bruker FID (real part) - High level loading") # Plot the real part of the FID
-savefig("bruker_fid_hl_plot.svg"); nothing # Save figure for Documenter
+savefig("bruker_fid_hl_plot.svg"); nothing # hide
 ```
 ![](bruker_fid_hl_plot.svg)
 
@@ -115,7 +115,7 @@ time_axis = (0:length(fid_bruker)-1) .* dwell          # explicit time vector
 The same example can be used to quickly inspect the loaded FID:
 ```@example brukerEg
 plot(time_axis, real(fid_bruker), xlabel = "time / s", ylabel = "signal (a.u.)", title  = "Bruker FID (real part) - Low level loading") # Plot the real part of the FID
-savefig("bruker_fid_plot.svg"); nothing # Save figure for Documenter
+savefig("bruker_fid_plot.svg"); nothing # hide
 ```
 ![](bruker_fid_plot.svg)
 
@@ -143,7 +143,7 @@ xlabel = "time / s",
 ylabel = "signal (a.u.)",
 title = "JEOL FID (real part)")
 
-savefig("jeol_fid_plot.svg"); nothing
+savefig("jeol_fid_plot.svg"); nothing # hide
 ```
 ![](jeol_fid_plot.svg)
 
@@ -323,7 +323,7 @@ xlabel = "time / s",
 ylabel = "signal (a.u.)",
 title = "Bruker FID after zero filling")
 
-savefig("bruker_fid_zf_plot.svg"); nothing
+savefig("bruker_fid_zf_plot.svg"); nothing # hide
 ```
 ![](bruker_fid_zf_plot.svg)
 
@@ -354,7 +354,7 @@ t_ap = data_td_bruker_zf_ap.coord[1]
 y_ap = real.(data_td_bruker_zf_ap.dat)
 
 plot(t_ap, y_ap; xlabel="time / s", ylabel="signal (a.u.)", title="Bruker FID after ZF + AP")
-savefig("bruker_fid_zf_ap_plot.svg"); nothing
+savefig("bruker_fid_zf_ap_plot.svg"); nothing # hide
 ```
 ![](bruker_fid_zf_ap_plot.svg)
 
@@ -398,7 +398,7 @@ xlabel = "frequency [Hz]",
 ylabel = "signal (a.u.)",
 title = "Bruker spectrum (ZF + AP + FT)")
 
-savefig("bruker_fd_zf_ap_plot.svg"); nothing
+savefig("bruker_fd_zf_ap_plot.svg"); nothing # hide
 ```
 ![](bruker_fd_zf_ap_plot.svg)
 
@@ -439,7 +439,7 @@ plot(f_pc, y_pc, xaxis=:flip,
      ylabel = "signal (a.u.)",
      title  = "Bruker spectrum (ZF + AP + FT + PC)")
 
-savefig("bruker_fd_zf_ap_pc_plot.svg"); nothing
+savefig("bruker_fd_zf_ap_pc_plot.svg"); nothing # hide
 ```
 ![](bruker_fd_zf_ap_pc_plot.svg)
 
@@ -478,7 +478,7 @@ plot(f_bc, y_bc,  xaxis=:flip,
      ylabel = "signal (a.u.)",
      title  = "Bruker spectrum (ZF + AP + FT + PC + BC)")
 
-savefig("bruker_fd_zf_ap_pc_bc_plot.svg"); nothing
+savefig("bruker_fd_zf_ap_pc_bc_plot.svg"); nothing # hide
 ```
 ![](bruker_fd_zf_ap_pc_bc_plot.svg)
 
@@ -543,7 +543,7 @@ plot(f_proc, y_proc,  xaxis=:flip,
      ylabel = "signal (a.u.)",
      title  = "Bruker spectrum (ZF + AP + FT + PC + BC)")
 
-savefig("bruker_full_pipeline_plot.svg"); nothing
+savefig("bruker_full_pipeline_plot.svg"); nothing # hide
 ```
 ![](bruker_full_pipeline_plot.svg)
 
