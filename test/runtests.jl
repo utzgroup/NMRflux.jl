@@ -74,12 +74,29 @@ end
     @test all(R2.dat .≈ S1d.dat .* 2.0)
 end
 
+@testset "Craft.analyze" begin
+    ex = NMRflux.Examples.Data["HCC cell culture media spectra"]["files"][1]
+    params, fid_full = NMRflux.load(ex, :Bruker)
+    fid = fid_full[1:4096]   # short section, for a fast test
+
+    K = 20
+    result = NMRflux.Craft.analyze(fid, K)
+    tbl = result["resonance_table"]
+
+    SW = 1.0 / step(NMRflux.coords(fid, 1))
+
+    @test size(tbl, 1) == K
+    @test all(-SW/2 .<= tbl.frequency_hz .<= SW/2)
+    @test all(isfinite, tbl.intensity)
+    @test all(isfinite, tbl.phase_rad)
+    @test all(isfinite, tbl.linewidth_hz)
+end
+
 # ---------------------------------------------------------------------------
 # 3. FileIO — Bruker
 # ---------------------------------------------------------------------------
 @testset "FileIO Bruker" begin
     params, d = NMRflux.load(bruker_file(), :Bruker)
-
     @test isa(params, Dict)
     @test haskey(params, "SW_h")
     @test haskey(params, "GRPDLY")
