@@ -31,7 +31,7 @@ The documentation ships with small example datasets accessible via `NMRflux.Exam
 ```@example brukerEg
 using NMRflux
 using NMRflux.Examples
-using Plots: plot, savefig
+using Plots: plot, plot!, savefig
 
 data_bruker = NMRflux.Examples.Data["HCC cell culture media spectra"]
 
@@ -52,45 +52,55 @@ savefig("quickstart_bruker_fid.svg"); nothing # hide
 
 # 3. Classical 1D processing pipeline
 
-Most 1D processing follows a standard pipeline:
-1. Zero fill (improve digital resolution)
-2. Apodize (reduce truncation artefacts)
-3. Fourier transform (FID -> spectrum)
-4. Phase correction
-5. Baseline correction
-
 In `NMRflux.jl`, processing is implemented via `NMRProcessor` functors that can be composed using `Chain`.
 
+Here is a minimal example of a processing pipeline:
+
 ```@example brukerEg
-using NMRflux
-using Plots: plot, savefig
 
-# Load again (clean cell in Documenter)
-params_bruker, data_td = NMRflux.load(joinpath(data_bruker["path"], "10"), :Bruker)
+Processing = Chain(
+    ZeroFill([2^16]),
+    FourierTransform([2^16],[1]),
+    AutoPhaseCorrectChen(1)
+)
 
-# Typical settings for a 1D spectrum
-N_orig = length(data_td.dat)
-N_target = 2^16
-N_new = max(N_orig, N_target)
+proc = Processing(data_td / 1e10 )
 
-# Define mini processors
-zf = ZeroFill([N_new])
-ap = Apodize([0.5]) # time domain exponential decay constant
-ft = FourierTransform([N_new], [1]; fftshift=true)
-pc = PhaseCorrect(0.0, -0.01π, 1) # example values (ph0, ph1, dim)
-apc = AutoPhaseCorrectChen(1)
-mbc = NMRflux.MedianBaselineCorrect(1; wdw=256)
+plot(proc.coord[1]/700 .+ 4.78, real.(proc),xaxis=:flip,
+xlims=[-0.5,9.0]
+)
 
-p = Chain(zf, ap, ft, pc, apc, mbc) # The main processor
-data_fd = p(data_td) # processed frequency domain SpectData
+savefig("quickstart_basic_spect.svg") ; nothing # hide
+```
+![](quickstart_basic_spect.svg)
 
-f = data_fd.coord[1]
-s = real.(data_fd.dat)
+`Processing` consists of zero filling to 64k points, Fourier transformation,
+and automatic phase correction.
 
-plot(f, s, xaxis=:flip,
-xlabel="frequency / Hz",
-ylabel="signal (a.u.)",
-title="Processed spectrum (ZF + AP + FT + PC + BC)")
+In practice, other steps may be added, for example a digital filter to 
+remove the solvent artefact (appearing in the middle of the spectrum),
+apodization (to balance resolution and sensitivity), and baseline 
+correction (to remove distortions due to probe ringing):
+
+```@example brukerEg
+dt = step(data_td.coord[1])
+
+Processing = Chain(
+    ZeroFill([2^16]),
+    Apodize([0.5π]),
+    DigitalFilter(NMRflux.BandReject(-0.0025,0.005,1024),1),
+    FourierTransform([2^16],[1]),
+    PhaseCorrect(0.0,2pi*1024*dt,1),
+    AutoPhaseCorrectChen(1),
+    MedianBaselineCorrect(1,wdw=2048)
+)
+
+proc = Processing(data_td / 1e10 )
+
+integral = proc |> Integral(1)
+
+plot(proc.coord[1]/700 .+ 4.78, real.(proc),xaxis=:flip, xlims=[-0.5,9.0],label="Spectrum", xlabel="Chemical Shift (ppm)")
+plot!(proc.coord[1]/700 .+ 4.78, real(integral ) ./20 , xaxis=:flip,label="Integral")
 
 savefig("quickstart_processing_pipeline.svg"); nothing # hide
 ```
