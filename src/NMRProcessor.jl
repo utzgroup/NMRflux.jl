@@ -249,7 +249,7 @@ function (int::Integral)(spect::SpectData{T,1}) where {T<:Number}
 end 
 
 
-ent(x) = x*log(x)
+ent(x) = -x*log(x)
 
 import Optim
 
@@ -266,7 +266,7 @@ phase correction for automatic (unsupervised) phase correction.
 function entropy(s::SpectData{T,1}) where {T<:Number}
     h= s.dat .|> real  .|> abs
     h/=sum(h)
-    return sum(ent.(h))/length(h)
+    return sum(ent.(h))
 end
 
 

@@ -78,9 +78,10 @@ zf = ZeroFill([N_new])
 ap = Apodize([0.5]) # time domain exponential decay constant
 ft = FourierTransform([N_new], [1]; fftshift=true)
 pc = PhaseCorrect(0.0, -0.01π, 1) # example values (ph0, ph1, dim)
+apc = AutoPhaseCorrectChen(1)
 mbc = NMRflux.MedianBaselineCorrect(1; wdw=256)
 
-p = Chain(zf, ap, ft, pc, mbc) # The main processor
+p = Chain(zf, ap, ft, pc, apc, mbc) # The main processor
 data_fd = p(data_td) # processed frequency domain SpectData
 
 f = data_fd.coord[1]
