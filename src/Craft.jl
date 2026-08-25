@@ -251,7 +251,8 @@ function fit_fid_fixed_freq(fid::AbstractVector{<:Complex}, r::StepRangeLen,
     B          = fit.param
     amplitude  = abs.(B[1:3:end] .+ im .* B[2:3:end])
     phase_rad  = angle.(B[1:3:end] .+ im .* B[2:3:end])
-    decay_rate_fit = DECAY_MAX ./ (1 .+ exp.(-B[3:3:end]))
+    decay_rate_fit = decay_rate_from_param.(B[3:3:end])  # decay rate in rad/s
+    #DECAY_MAX ./ (1 .+ exp.(-B[3:3:end]))
 
     idx = sortperm(freq_hz)
     result = Dict(

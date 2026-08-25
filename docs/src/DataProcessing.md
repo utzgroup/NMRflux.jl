@@ -40,7 +40,7 @@ t = data_td_joel.coord[1]
 y = real.(data_td_joel.dat)
 
 plot(t, y;
-xlims = [0,0.001],     
+xlims = [0,0.005],     
 xlabel = "time / s",
 ylabel = "signal (a.u.)",
 title = "JOEL FID (real part)")
@@ -61,13 +61,13 @@ N_target = 2^16                     # Target size: 64k points (2^16)
 N_new = max(N_orig, N_target)       # Never shrink: only zero fill if N_orig < N_target
 zf = ZeroFill([N_new])              # Create ZeroFill processor
 
-data_td_joel_zf = zf(data_td_joel)  # Apply zero filling to the SpectData object
-(size(data_td_joel.dat), size(data_td_joel_zf.dat)) # Before/after sizes
+data_p = data_td_joel |> zf  # Apply zero filling to the SpectData object
+(size(data_td_joel), size(data_p)) # Before/after sizes
 ```
 
 ```@example joelEg
-t_zf = data_td_joel_zf.coord[1]
-y_zf = real.(data_td_joel_zf.dat)
+t_zf = data_p.coord[1]
+y_zf = real.(data_p.dat)
 
 plot(t_zf, y_zf;
 xlabel = "time / s",
@@ -94,16 +94,15 @@ Internally, Apodize uses the coordinate vector of each selected dimension to com
 ```@example joelEg
 ap = Apodize([0.5]) # Decay constant for the first (time) dimension
 
-data_td_joel_zf_ap = ap(data_td_joel_zf)
+data_p = data_td_joel |> zf |> ap ;
 
-size(data_td_joel_zf_ap.dat), data_td_joel_zf_ap.coord[1][1:5]
 ```
 This produces a windowed time domain signal suitable for Fourier transformation.
 
 ```@example joelEg
 # Extract time axis and real part AFTER apodization
-t_ap = data_td_joel_zf_ap.coord[1]
-y_ap = real.(data_td_joel_zf_ap.dat)
+t_ap = data_p.coord[1]
+y_ap = real.(data_p)
 
 plot(t_ap, y_ap; xlabel="time / s", ylabel="signal (a.u.)", title="JOEL FID after ZF + AP")
 savefig("joel_fid_zf_ap_plot.svg"); nothing  # hide
@@ -134,16 +133,15 @@ end
 
 Example: Continuing from Section *4.4*, we start from the apodized, zero filled FID `data_td_joel_zf_ap`:
 ```@example joelEg
-SI = [length(data_td_joel_zf_ap.dat)]           # Size of the apodized time domain data (1D)
-ft = FourierTransform(SI, [1]; fftshift = true) # Construct a FourierTransform along the first dimension, with fftshift
+SI = 2^16           # Size of the apodized time domain data (1D)
+ft = FourierTransform([SI], [1]; fftshift = true) # Construct a FourierTransform along the first dimension, with fftshift
 
-data_fd_joel_zf_ap = ft(data_td_joel_zf_ap)     # Apply FT to the apodized zero filled SpectData
-size(data_fd_joel_zf_ap.dat)
+data_p = data_td_joel  |> zf |> ap |> ft  ;   # Apply FT to the apodized zero filled SpectData
 ```
 
 ```@example joelEg
-f_ap = data_fd_joel_zf_ap.coord[1]   # frequency axis (Hz)
-y_ap = real.(data_fd_joel_zf_ap.dat) # real spectrum
+f_ap = data_p.coord[1]   # frequency axis (Hz)
+y_ap = real.(data_p) # real spectrum
 
 plot(f_ap, y_ap, xaxis=:flip,
 xlabel = "frequency [Hz]",
@@ -168,11 +166,10 @@ ph1 = 2pi*0.00175   # first-order phase (radians)
 dim = 1             # apply along the first (frequency) dimension
 
 pc = PhaseCorrect(ph0, ph1, dim)
-data_fd_joel_zf_ap_pc = pc(data_fd_joel_zf_ap)
+data_p =data_td_joel  |> zf |> ap |> ft |> pc 
 
-eltype(data_fd_joel_zf_ap_pc.dat), ndims(data_fd_joel_zf_ap_pc.dat)
-f_pc = data_fd_joel_zf_ap_pc.coord[1]
-y_pc = real.(data_fd_joel_zf_ap_pc.dat)
+f_pc = data_p.coord[1]
+y_pc = real.(data_p)
 
 plot(f_pc, y_pc, xaxis=:flip,
      xlabel = "frequency [Hz]",
@@ -206,14 +203,12 @@ ph0_guess = -0.55pi
 ph1_guess = 2pi*0.00175
 
 pc_guess = PhaseCorrect(ph0_guess, ph1_guess, 1)
-data_fd_joel_zf_ap_pc_guess = pc_guess(data_fd_joel_zf_ap)
 
 apc = NMRflux.AutoPhaseCorrectChen(1, verbose=false, γ=0.0e-5)
-data_fd_joel_zf_ap_apc = apc(data_fd_joel_zf_ap_pc_guess)
+data_p = data_td_joel |> zf |> ap |> ft |> pc_guess |> apc ;
 
-eltype(data_fd_joel_zf_ap_apc.dat), ndims(data_fd_joel_zf_ap_apc.dat)
-f_apc = data_fd_joel_zf_ap_apc.coord[1]
-y_apc = real.(data_fd_joel_zf_ap_apc.dat)
+f_apc = data_p.coord[1]
+y_apc = real.(data_p)
 
 plot(f_apc, y_apc, xaxis=:flip,
      xlabel = "frequency [Hz]",
@@ -230,7 +225,7 @@ For example, a stronger penalty can be used as follows:
 
 ```@example joelEg
 apc_stronger_penalty = NMRflux.AutoPhaseCorrectChen(1, verbose=false, γ=1.0e-4)
-data_fd_joel_zf_ap_apc_penalty = apc_stronger_penalty(data_fd_joel_zf_ap_pc_guess)
+data_fd_joel_zf_ap_apc_penalty = apc_stronger_penalty(data_p)
 
 eltype(data_fd_joel_zf_ap_apc_penalty.dat), ndims(data_fd_joel_zf_ap_apc_penalty.dat)
 ```
@@ -254,14 +249,13 @@ where:
 Example: Continuing from the previous section, we start from the phased frequency domain spectrum `data_fd_joel_zf_ap_pc`:
 ```@example joelEg
 mbc = NMRflux.MedianBaselineCorrect(1; wdw=2<<12) # baseline correction along frequency dimension
-data_fd_joel_zf_ap_pc_bc = mbc(data_fd_joel_zf_ap_pc)
+data_p = data_td_joel |> zf |> ap |> ft |> pc |> apc |> mbc;
 
-size(data_fd_joel_zf_ap_pc_bc.dat), data_fd_joel_zf_ap_pc_bc.coord[1][1:5]
 ```
 
 ```@example joelEg
-f_bc = data_fd_joel_zf_ap_pc_bc.coord[1]          # frequency axis (Hz)
-y_bc = real.(data_fd_joel_zf_ap_pc_bc.dat)        # real part after baseline correction
+f_bc = data_p.coord[1]          # frequency axis (Hz)
+y_bc = real.(data_p)        # real part after baseline correction
 
 plot(f_bc, y_bc,  xaxis=:flip,
      xlabel = "frequency [Hz]",
