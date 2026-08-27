@@ -1,4 +1,18 @@
-## (c)2025 Marcel Utz
+###########################################################################
+# File:        DataSet.jl
+# Project:     NMRflux.jl
+#
+# Description:
+#   Defines the SpectData array type and associated coordinate handling.
+#   Provides the high level load interface for importing NMR data from
+#   supported vendor formats into SpectData objects.
+#
+# Original implementation:
+#   Marcel Utz
+#
+# Additional vendor support:
+#   Manaz Kaleel
+###########################################################################
 
 # abstract type CoordMap{T} <: AbstractVector{T} end
 
@@ -96,6 +110,9 @@ the origin data format. Currently implemented are
 
 - `:Bruker`: the path points to a directory with a Bruker NMR data set.
 - `:JEOL`: the path points to a JEOL `.jdf` file
+- `:Magritek`: the path points to a Magritek `data.1d` and `acqu.par` files
+- `:Varian`: the path points to a Varian `fid` and `procpar` files
+- `:Oxford`: the path points to a Oxford `.dx/jdx` files
 """
 function load(f::String,vendor::Symbol)
     if vendor == :Bruker 
@@ -110,6 +127,73 @@ function load(f::String,vendor::Symbol)
         close(io)
         arr, coords = FileIO.reshapeJEOL(header, params, data)
         return params, SpectData(arr, coords)
+    elseif vendor == :Magritek
+        parameterFile = joinpath(f, "acqu.par")
+        dataFile = joinpath(f, "data.1d")
+
+        params = FileIO.readMagritekParameterFile(parameterFile)
+        haskey(params, "bandwidth") || error("Magritek acqu.par is missing the " * "bandwidth parameter")
+
+        _header, _storedAxis, rawdata = FileIO.readMagritekFID(dataFile)
+        spectralWidth = Float64(params["bandwidth"]) * FileIO.KILOHERTZ_TO_HERTZ
+
+        spectralWidth > 0 || error("Magritek bandwidth must be positive")
+        tcoord = range(0.0, step=1.0 / spectralWidth, length=length(rawdata),)
+
+        return params, SpectData(rawdata, (tcoord,))
+    elseif vendor == :Varian
+        parameterFile = joinpath(f, "procpar")
+        dataFile = joinpath(f, "fid")
+
+        params = FileIO.readVarianParameterFile(parameterFile)
+
+        haskey(params, "sw") ||
+            error(
+                "Varian procpar is missing the spectral width sw"
+            )
+
+        _fileHeader, _blockHeader, rawdata =
+            FileIO.readVarianFID(dataFile)
+
+        spectralWidth = Float64(params["sw"])
+
+        spectralWidth > 0 ||
+            error("Varian spectral width sw must be positive")
+
+        if haskey(params, "np")
+            procparPointCount =
+                Int(round(Float64(params["np"])))
+
+            binaryPointCount =
+                2 * length(rawdata)
+
+            if procparPointCount != binaryPointCount
+                @warn(
+                    "Varian procpar np differs from the binary file",
+                    procparPointCount,
+                    binaryPointCount,
+                )
+            end
+        end
+
+        tcoord = range(
+            0.0,
+            step=1.0 / spectralWidth,
+            length=length(rawdata),
+        )
+
+        return params, SpectData(rawdata, (tcoord,))
+    elseif vendor == :Oxford
+        dataFile =
+            FileIO.resolveOxfordJcampFile(f)
+
+        records, timeAxis, rawdata =
+            FileIO.readOxfordFID(dataFile)
+
+        params =
+            FileIO.oxfordParameterDictionary(records)
+
+        return params, SpectData(rawdata, (timeAxis,))
     else 
         error("Unsupported data format")
     end

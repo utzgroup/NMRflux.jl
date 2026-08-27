@@ -1,3 +1,19 @@
+###########################################################################
+# File:        FileIO.jl
+# Project:     NMRflux.jl
+#
+# Description:
+#   Low level routines for importing vendor-specific NMR data formats.
+#   Supported formats include Bruker, JEOL, Magritek Spinsolve,
+#   Agilent/Varian, and Oxford Instruments data.
+#
+# Original implementation:
+#   Marcel Utz
+#
+# Additional vendor support:
+#   Manaz Kaleel
+###########################################################################
+
 @doc raw"""
     module FileIO
 
@@ -87,6 +103,1559 @@ function readBrukerParameterFile(s::String)
 end
 
 #end
+
+# Magritek Spinsolve data.1d layout.
+const MAGRITEK_HEADER_BYTES = 32       # eight little endian UInt32 values
+const MAGRITEK_HEADER_XDIM_INDEX = 5   # 5th header field is xDim (complex point count)
+const MAGRITEK_SECTION_COUNT = 3       # Body contains N axis values followed by 2N interleaved real/imag values
+const KILOHERTZ_TO_HERTZ = 1000.0      # acqu.par bandwidth is given in kHz
+
+"""
+    parseMagritekValue(rawValue::AbstractString)
+
+Return the typed value of a single acqu.par field. Quoted text becomes a
+String with the quotes removed. Everything else is parsed to Int64 or
+Float64, falling back to the original text.
+"""
+function parseMagritekValue(rawValue::AbstractString)
+    if length(rawValue) >= 2 && first(rawValue) == '"' && last(rawValue) == '"'
+        # return String(rawValue[2:end-1])
+        return String(chop(rawValue; head=1, tail=1))
+    end
+    return numparse(rawValue)
+end
+
+"""
+    readMagritekParameterFile(s::String) -> Dict{String,Any}
+
+Read a Magritek Spinsolve acqu.par file and return its parameters as a
+dict. String values are unquoted, numeric values are Int64 or Float64.
+"""
+function readMagritekParameterFile(s::String)
+    isfile(s) || error("Magritek parameter file not found: $s")
+    params = Dict{String,Any}()
+    for line in eachline(s)
+        stripped = strip(line)
+        (isempty(stripped) || !occursin("=", stripped)) && continue
+        key, rawValue = split(stripped, "=", limit=2)
+        key = strip(key)
+        isempty(key) && continue
+        params[key] = parseMagritekValue(strip(rawValue))
+    end
+    return params
+end
+
+"""
+    readMagritekFID(s::String) -> (header, xaxis, complexData)
+
+Read the complex free induction decay from a Spinsolve data.1d file.
+
+Layout:
+1. 32 byte header of eight little endian UInt32 values
+2. remaining little endian Float32 values in three equal sections:
+   time axis, then real and imaginary channels interleaved
+
+The stored axis is returned for validation. The caller currently
+constructs the time coordinate from the bandwidth parameter. The caller builds
+the time coordinate from the bandwidth parameter so that all vendors go
+through the same path. The stored axis is a useful cross check.
+"""
+function readMagritekFID(s::String)
+    isfile(s) || error("Magritek data file not found: $s")
+    bytes = read(s)
+    length(bytes) > MAGRITEK_HEADER_BYTES ||
+        error("Magritek data file is too short to hold a header: $s")
+
+    # header = ltoh.(reinterpret(Int32, bytes[1:MAGRITEK_HEADER_BYTES]))
+    header = ltoh.(reinterpret(UInt32, bytes[1:MAGRITEK_HEADER_BYTES]))
+    declaredPoints = Int(header[MAGRITEK_HEADER_XDIM_INDEX])
+
+    body = bytes[(MAGRITEK_HEADER_BYTES + 1):end]
+    (length(body) % sizeof(Float32) == 0) ||
+        error("Magritek data body is not a whole number of Float32 values: $s")
+
+    # floats = ltoh.(reinterpret(Float32, body))
+    floatWords = ltoh.(reinterpret(UInt32, body))
+    floats = reinterpret(Float32, floatWords)
+    (length(floats) % MAGRITEK_SECTION_COUNT == 0) ||
+        error("Magritek data body does not split into three equal sections: $s")
+
+    pointsPerSection = div(length(floats), MAGRITEK_SECTION_COUNT)
+    if declaredPoints != pointsPerSection
+        @warn "Magritek header point count differs from data length" declaredPoints pointsPerSection
+    end
+
+    xaxis = copy(@view floats[1:pointsPerSection])
+    realPart = @view floats[(pointsPerSection + 1):2:end]
+    imagPart = @view floats[(pointsPerSection + 2):2:end]
+    #return complex.(Float64.(realPart), Float64.(imagPart))
+    complexData = complex.(Float64.(realPart), Float64.(imagPart))
+
+    return header, xaxis, complexData
+end
+
+const VARIAN_FILE_HEADER_BYTES = 32
+const VARIAN_BLOCK_HEADER_BYTES = 28
+
+const VARIAN_STATUS_S_DATA = UInt16(0x0001)
+const VARIAN_STATUS_S_32 = UInt16(0x0004)
+const VARIAN_STATUS_S_FLOAT = UInt16(0x0008)
+
+const VARIAN_BASICTYPE_NUMERIC = "1"
+const VARIAN_BASICTYPE_STRING = "2"
+const VARIAN_PROCPAR_HEADER_FIELD_COUNT = 11
+
+
+"""
+    readVarianBigEndian(f::IO, type)
+
+Read one value from a Varian binary file and convert it from big endian
+storage to the byte order used by the current computer.
+"""
+readVarianBigEndian(f::IO, ::Type{Int16}) = ntoh(read(f, Int16))
+readVarianBigEndian(f::IO, ::Type{Int32}) = ntoh(read(f, Int32))
+
+readVarianBigEndian(f::IO, ::Type{UInt16}) = ntoh(read(f, UInt16))
+readVarianBigEndian(f::IO, ::Type{UInt32}) = ntoh(read(f, UInt32))
+
+function readVarianBigEndian(f::IO, ::Type{Float32})
+    word = readVarianBigEndian(f, UInt32)
+    return reinterpret(Float32, word)
+end
+
+
+"""
+    varianElementType(status::Integer) -> DataType
+
+Return the sample type stored in a Varian fid file.
+
+Float32 takes priority over Int32. Int16 is used when neither status bit
+is set.
+"""
+function varianElementType(status::Integer)
+    statusBits = UInt16(status)
+
+    if (statusBits & VARIAN_STATUS_S_FLOAT) != 0
+        return Float32
+    elseif (statusBits & VARIAN_STATUS_S_32) != 0
+        return Int32
+    else
+        return Int16
+    end
+end
+
+
+"""
+    extractVarianQuotedValue(line::AbstractString) -> String
+
+Return the text inside the first pair of double quotes.
+"""
+function extractVarianQuotedValue(line::AbstractString)
+    firstQuote = findfirst(==('"'), line)
+
+    firstQuote === nothing &&
+        error("Expected a quoted value in procpar line: $line")
+
+    secondQuote =
+        findnext(==('"'), line, nextind(line, firstQuote))
+
+    secondQuote === nothing &&
+        error("Expected a closing quote in procpar line: $line")
+
+    startIndex = nextind(line, firstQuote)
+    stopIndex = prevind(line, secondQuote)
+
+    startIndex > stopIndex && return ""
+
+    return String(line[startIndex:stopIndex])
+end
+
+
+"""
+    readVarianParameter(f::IO)
+
+Read one parameter record from a Varian procpar file.
+
+A parameter with one value is returned as a scalar. A parameter with
+several values is returned as a vector. The return value is a pair
+containing the parameter name and its value. Nothing is returned at the
+end of the file.
+"""
+function readVarianParameter(f::IO)
+    headerLine = nothing
+
+    while !eof(f)
+        candidate = readline(f)
+
+        if !isempty(strip(candidate))
+            headerLine = candidate
+            break
+        end
+    end
+
+    headerLine === nothing && return nothing
+
+    fields = split(strip(headerLine))
+
+    length(fields) >= VARIAN_PROCPAR_HEADER_FIELD_COUNT ||
+        error("Malformed Varian procpar parameter line: $headerLine")
+
+    name = String(fields[1])
+    basicType = String(fields[3])
+
+    eof(f) &&
+        error("Missing value line for Varian parameter $name")
+
+    valueLine = readline(f)
+    valueTokens = split(strip(valueLine))
+
+    isempty(valueTokens) &&
+        error("Empty value line for Varian parameter $name")
+
+    valueCount = parse(Int, valueTokens[1])
+
+    valueCount >= 0 ||
+        error("Negative value count for Varian parameter $name")
+
+    values = Any[]
+
+    if basicType == VARIAN_BASICTYPE_NUMERIC
+        numericTokens = valueTokens[2:end]
+
+        length(numericTokens) == valueCount ||
+            error(
+                "Varian parameter $name declares $valueCount values " *
+                "but contains $(length(numericTokens)) values"
+            )
+
+        for token in numericTokens
+            push!(values, numparse(token))
+        end
+
+    elseif basicType == VARIAN_BASICTYPE_STRING
+        if valueCount > 0
+            push!(values, extractVarianQuotedValue(valueLine))
+
+            for _ in 2:valueCount
+                eof(f) &&
+                    error("Missing string value for Varian parameter $name")
+
+                push!(
+                    values,
+                    extractVarianQuotedValue(readline(f)),
+                )
+            end
+        end
+
+    else
+        error(
+            "Unsupported Varian procpar basic type $basicType " * "for parameter $name"
+        )
+    end
+
+    eof(f) &&
+        error("Missing enumerable line for Varian parameter $name")
+
+    readline(f)
+
+    value =
+        length(values) == 1 ? values[1] : values
+
+    return name => value
+end
+
+
+"""
+    readVarianParameterFile(s::String) -> Dict{String,Any}
+
+Read an Agilent or Varian procpar file.
+
+Numeric values are returned as Int64 or Float64 where possible. Text
+values are returned as String objects. Parameters containing several
+values are returned as vectors.
+"""
+function readVarianParameterFile(s::String)
+    isfile(s) ||
+        error("Varian procpar file not found: $s")
+
+    params = Dict{String,Any}()
+
+    open(s, "r") do f
+        while true
+            parameter = readVarianParameter(f)
+
+            parameter === nothing && break
+
+            params[first(parameter)] = last(parameter)
+        end
+    end
+
+    return params
+end
+
+
+"""
+    readVarianFileHeader(f::IO) -> Dict{String,Any}
+
+Read the 32 byte big endian Varian file header.
+
+Integer counts are returned as Int values. The status value is returned
+as UInt16 because it contains bit flags.
+"""
+function readVarianFileHeader(f::IO)
+    bytes = read(f, VARIAN_FILE_HEADER_BYTES)
+
+    length(bytes) == VARIAN_FILE_HEADER_BYTES ||
+        error(
+            "Could not read the complete 32 byte Varian file header"
+        )
+
+    readInt32(index) =
+        Int(
+            ntoh(
+                reinterpret(
+                    Int32,
+                    bytes[index:(index + 3)],
+                )[1],
+            ),
+        )
+
+    readInt16(index) =
+        Int(
+            ntoh(
+                reinterpret(
+                    Int16,
+                    bytes[index:(index + 1)],
+                )[1],
+            ),
+        )
+
+    readUInt16(index) =
+        ntoh(
+            reinterpret(
+                UInt16,
+                bytes[index:(index + 1)],
+            )[1],
+        )
+
+    header = Dict{String,Any}()
+
+    header["nblocks"] = readInt32(1)
+    header["ntraces"] = readInt32(5)
+    header["np"] = readInt32(9)
+    header["ebytes"] = readInt32(13)
+    header["tbytes"] = readInt32(17)
+    header["bbytes"] = readInt32(21)
+    header["vers_id"] = readInt16(25)
+    header["status"] = readUInt16(27)
+    header["nbheaders"] = readInt32(29)
+
+    return header
+end
+
+
+"""
+    readVarianBlockHeader(f::IO) -> Dict{String,Any}
+
+Read the first 28 byte block header from a Varian fid file.
+"""
+function readVarianBlockHeader(f::IO)
+    header = Dict{String,Any}()
+
+    header["lvl"] = readVarianBigEndian(f, Float32)
+    header["tlt"] = readVarianBigEndian(f, Float32)
+
+    header["scale"] = readVarianBigEndian(f, Int16)
+    header["index"] = readVarianBigEndian(f, Int16)
+    header["lpval"] = readVarianBigEndian(f, Float32)
+    header["rpval"] = readVarianBigEndian(f, Float32)
+
+    header["mode"] = readVarianBigEndian(f, UInt16)
+    header["status"] = readVarianBigEndian(f, UInt16)
+    header["ctcount"] = readVarianBigEndian(f, Int32)
+    
+    return header
+end
+
+
+"""
+    readVarianFID(s::String) ->
+        (fileHeader, blockHeader, complexData)
+
+Read a conventional one dimensional Agilent or Varian fid file.
+
+The current reader accepts exactly one block and one trace. This avoids
+silently discarding data from arrayed or multidimensional experiments.
+
+The returned complex data uses ComplexF64, matching the current
+Magritek reader.
+"""
+function readVarianFID(s::String)
+    isfile(s) ||
+        error("Varian fid file not found: $s")
+
+    fileBytes = filesize(s)
+
+    fileBytes >=
+        VARIAN_FILE_HEADER_BYTES + VARIAN_BLOCK_HEADER_BYTES ||
+        error("Varian fid file is too short: $s")
+
+    open(s, "r") do f
+        fileHeader = readVarianFileHeader(f)
+
+        status = fileHeader["status"]
+
+        (status & VARIAN_STATUS_S_DATA) != 0 ||
+            error("Varian fid file does not contain data: $s")
+
+        fileHeader["nblocks"] > 0 ||
+            error("Varian nblocks must be positive: $s")
+
+        fileHeader["ntraces"] > 0 ||
+            error("Varian ntraces must be positive: $s")
+
+        fileHeader["np"] > 0 ||
+            error("Varian np must be positive: $s")
+
+        fileHeader["nbheaders"] > 0 ||
+            error("Varian nbheaders must be positive: $s")
+
+        totalTraces =
+            fileHeader["nblocks"] * fileHeader["ntraces"]
+
+        totalTraces == 1 ||
+            error(
+                "The current Varian reader supports one dimensional " *
+                "files containing exactly one trace. This file contains " *
+                "$totalTraces traces and may be arrayed or multidimensional: $s"
+            )
+
+        pointsPerTrace = fileHeader["np"]
+
+        iseven(pointsPerTrace) ||
+            error(
+                "Varian np must be even because real and imaginary " *
+                "values are interleaved: $s"
+            )
+
+        elementType = varianElementType(status)
+
+        fileHeader["ebytes"] == sizeof(elementType) ||
+            error(
+                "Varian ebytes does not match the sample type. " *
+                "Header value is $(fileHeader["ebytes"]) and expected " *
+                "value is $(sizeof(elementType)): $s"
+            )
+
+        expectedTraceBytes =
+            pointsPerTrace * fileHeader["ebytes"]
+
+        fileHeader["tbytes"] == expectedTraceBytes ||
+            error(
+                "Varian tbytes does not match np and ebytes. " *
+                "Header value is $(fileHeader["tbytes"]) and expected " *
+                "value is $expectedTraceBytes: $s"
+            )
+
+        minimumBlockBytes =
+            fileHeader["nbheaders"] * VARIAN_BLOCK_HEADER_BYTES +
+            fileHeader["ntraces"] * fileHeader["tbytes"]
+
+        fileHeader["bbytes"] >= minimumBlockBytes ||
+            error(
+                "Varian bbytes is smaller than the block headers and data: $s"
+            )
+
+        expectedFileBytes =
+            VARIAN_FILE_HEADER_BYTES +
+            fileHeader["nblocks"] * fileHeader["bbytes"]
+
+        fileBytes >= expectedFileBytes ||
+            error(
+                "Varian fid file is shorter than the size declared " *
+                "in its header: $s"
+            )
+
+        if fileBytes != expectedFileBytes
+            @warn(
+                "Varian file size differs from the size declared in the header",
+                fileBytes,
+                expectedFileBytes,
+            )
+        end
+
+        blockHeader = readVarianBlockHeader(f)
+
+        for _ in 2:fileHeader["nbheaders"]
+            skip(f, VARIAN_BLOCK_HEADER_BYTES)
+        end
+
+        samples =
+            Vector{elementType}(undef, pointsPerTrace)
+
+        for index in eachindex(samples)
+            samples[index] =
+                readVarianBigEndian(f, elementType)
+        end
+
+        realPart = @view samples[1:2:end]
+        imagPart = @view samples[2:2:end]
+
+        complexData =
+            complex.(
+                Float64.(realPart),
+                Float64.(imagPart),
+            )
+
+        return fileHeader, blockHeader, complexData
+    end
+end
+
+# Constants
+
+const OXFORD_RECORD_PREFIX = "##"
+const OXFORD_COMMENT_MARKER = "\$\$"
+const OXFORD_DATA_TABLE_KEY = "DATATABLE"
+
+const OXFORD_REAL_MARKER = "R..R"
+const OXFORD_IMAGINARY_MARKER = "I..I"
+
+const OXFORD_FILE_EXTENSIONS = (".dx", ".jdx")
+
+const OXFORD_NUMBER_PATTERN =
+    r"[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?"
+
+const OXFORD_FIRST_VALUE_PATTERN =
+    r"^\s*[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?"
+
+const OXFORD_LIST_KEYS = Set([
+    "SYMBOL",
+    "VARNAME",
+    "VARTYPE",
+    "VARFORM",
+    "VARDIM",
+    "UNITS",
+    "FACTOR",
+    "FIRST",
+    "LAST",
+    "MIN",
+    "MAX",
+])
+
+
+"""
+    normaliseJcampKey(key::AbstractString) -> String
+
+Return the canonical form of a JCAMP DX label.
+"""
+function normaliseJcampKey(key::AbstractString)
+    upperKey = uppercase(strip(key))
+
+    return replace(
+        upperKey,
+        " " => "",
+        "-" => "",
+        "_" => "",
+        "/" => "",
+    )
+end
+
+
+"""
+    normaliseJcampText(value::AbstractString) -> String
+
+Return an upper case value with spacing and angle brackets removed.
+"""
+function normaliseJcampText(value::AbstractString)
+    return replace(
+        uppercase(strip(value)),
+        r"[\s<>]" => "",
+    )
+end
+
+
+"""
+    splitOxfordList(value::AbstractString) -> Vector{String}
+
+Split a comma separated JCAMP DX list and remove optional outer
+parentheses.
+"""
+function splitOxfordList(value::AbstractString)
+    cleanValue = strip(value)
+
+    if startswith(cleanValue, "(") && endswith(cleanValue, ")")
+        cleanValue = strip(
+            chop(cleanValue; head=1, tail=1),
+        )
+    end
+
+    isempty(cleanValue) && return String[]
+
+    return strip.(split(cleanValue, ","))
+end
+
+
+"""
+    readOxfordBlocks(s::String)
+
+Read a JCAMP DX file and return its data blocks.
+
+Each block is represented as a dictionary whose keys map to lists of
+raw value strings. Repeated labels are retained.
+"""
+function readOxfordBlocks(s::String)
+    isfile(s) ||
+        error("Oxford JCAMP DX file not found: $s")
+
+    blocks =
+        Vector{Dict{String,Vector{String}}}()
+
+    blockStack =
+        Vector{Dict{String,Vector{String}}}()
+
+    activeBlock = nothing
+    currentKey = nothing
+    currentLines = String[]
+
+    function storeCurrentRecord()
+        activeBlock === nothing && return
+        currentKey === nothing && return
+
+        value = strip(join(currentLines, "\n"))
+
+        isempty(value) && return
+
+        push!(
+            get!(activeBlock, currentKey, String[]),
+            value,
+        )
+    end
+
+    for rawLine in eachline(s)
+        actualLine =
+            first(
+                split(
+                    rawLine,
+                    OXFORD_COMMENT_MARKER;
+                    limit=2,
+                ),
+            )
+
+        isempty(strip(actualLine)) && continue
+
+        strippedLine = replace(lstrip(actualLine), "\ufeff" => "",)
+
+        if startswith(strippedLine, OXFORD_RECORD_PREFIX)
+            storeCurrentRecord()
+
+            body =
+                strip(
+                    strippedLine[(length(OXFORD_RECORD_PREFIX) + 1):end],
+                )
+            parts = split(body, "="; limit=2)
+
+            key = normaliseJcampKey(parts[1])
+            value =
+                length(parts) == 2 ? strip(parts[2]) : ""
+
+            if key == "TITLE"
+                newBlock =
+                    Dict{String,Vector{String}}()
+
+                push!(blockStack, newBlock)
+                activeBlock = newBlock
+
+                currentKey = key
+                currentLines = [value]
+
+                continue
+            end
+
+            if key == "END"
+                activeBlock === nothing &&
+                    error(
+                        "Oxford JCAMP DX file contains END without TITLE: $s"
+                    )
+
+                push!(blocks, pop!(blockStack))
+
+                activeBlock =
+                    isempty(blockStack) ? nothing : last(blockStack)
+
+                currentKey = nothing
+                currentLines = String[]
+
+                continue
+            end
+
+            activeBlock === nothing &&
+                error(
+                    "Oxford JCAMP DX record appears outside a data block: " *
+                    "$strippedLine"
+                )
+
+            currentKey = key
+            currentLines = [value]
+
+        else
+            activeBlock === nothing &&
+                error(
+                    "Oxford JCAMP DX data appears outside a data block: " *
+                    "$actualLine"
+                )
+
+            currentKey === nothing &&
+                error(
+                    "Oxford JCAMP DX continuation line has no label: " *
+                    "$actualLine"
+                )
+
+            push!(currentLines, actualLine)
+        end
+    end
+
+    storeCurrentRecord()
+
+    isempty(blockStack) ||
+        error(
+            "Oxford JCAMP DX file contains a block without END: $s"
+        )
+
+    isempty(blocks) &&
+        error("Oxford JCAMP DX file contains no data blocks: $s")
+
+    return blocks
+end
+
+
+"""
+    oxfordRecordValues(records, key::String)
+
+Return all values stored for one canonical record key.
+"""
+function oxfordRecordValues(
+    records::Dict{String,Vector{String}},
+    key::String,
+)
+    return get(
+        records,
+        normaliseJcampKey(key),
+        String[],
+    )
+end
+
+
+"""
+    oxfordSingleValue(records, key::String) -> String
+
+Return the only value stored for a required record.
+"""
+function oxfordSingleValue(
+    records::Dict{String,Vector{String}},
+    key::String,
+)
+    canonicalKey = normaliseJcampKey(key)
+    values = get(records, canonicalKey, nothing)
+
+    values === nothing &&
+        error(
+            "Oxford JCAMP DX block is missing $canonicalKey"
+        )
+
+    length(values) == 1 ||
+        error(
+            "Oxford JCAMP DX block contains several $canonicalKey records"
+        )
+
+    return first(values)
+end
+
+
+"""
+    selectOxfordFidBlock(blocks)
+
+Select the single block whose data type is NMR FID and whose data class
+is NTUPLES.
+"""
+function selectOxfordFidBlock(
+    blocks::Vector{Dict{String,Vector{String}}},
+)
+    matches =
+        Dict{String,Vector{String}}[]
+
+    for block in blocks
+        dataTypes =
+            oxfordRecordValues(block, "DATATYPE")
+
+        dataClasses =
+            oxfordRecordValues(block, "DATACLASS")
+
+        hasFidType =
+            any(
+                value ->
+                    normaliseJcampText(value) == "NMRFID",
+                dataTypes,
+            )
+
+        hasNtuplesClass =
+            any(
+                value ->
+                    normaliseJcampText(value) == "NTUPLES",
+                dataClasses,
+            )
+
+        if hasFidType && hasNtuplesClass
+            push!(matches, block)
+        end
+    end
+
+    isempty(matches) &&
+        error(
+            "Oxford JCAMP DX file contains no NMR FID NTUPLES block"
+        )
+
+    length(matches) == 1 ||
+        error(
+            "Oxford JCAMP DX file contains several NMR FID NTUPLES blocks"
+        )
+
+    selected = first(matches)
+
+    dataType =
+        normaliseJcampText(
+            oxfordSingleValue(selected, "DATATYPE"),
+        )
+
+    dataClass =
+        normaliseJcampText(
+            oxfordSingleValue(selected, "DATACLASS"),
+        )
+
+    dataType == "NMRFID" ||
+        error("Oxford block data type is not NMR FID")
+
+    dataClass == "NTUPLES" ||
+        error("Oxford block data class is not NTUPLES")
+
+    return selected
+end
+
+
+"""
+    isOxfordCompressedLine(line::AbstractString) -> Bool
+
+Return true when a data line contains characters that are not part of
+plain AFFN numeric data.
+"""
+function isOxfordCompressedLine(line::AbstractString)
+    firstValue =
+        match(OXFORD_FIRST_VALUE_PATTERN, line)
+
+    firstValue === nothing &&
+        error(
+            "Oxford data line does not start with a numeric X value: $line"
+        )
+
+    residual =
+        replace(line, OXFORD_NUMBER_PATTERN => "")
+
+    residual =
+        replace(residual, r"[\s,]+" => "")
+
+    return !isempty(residual)
+end
+
+
+"""
+    parseOxfordDataValues(dataLines) -> Vector{Float64}
+
+Parse plain AFFN data lines.
+
+The first value on each line is the X value. It is not added to the
+returned Y data.
+"""
+function parseOxfordDataValues(dataLines)
+    values = Float64[]
+
+    for line in dataLines
+        isOxfordCompressedLine(line) &&
+            error(
+                "Oxford data table uses compressed or unsupported data. " *
+                "Export the FID as uncompressed JCAMP DX."
+            )
+
+        numbers =
+            collect(
+                eachmatch(
+                    OXFORD_NUMBER_PATTERN,
+                    line,
+                ),
+            )
+
+        length(numbers) > 1 ||
+            error(
+                "Oxford data line contains no Y values: $line"
+            )
+
+        for numberMatch in numbers[2:end]
+            push!(
+                values,
+                parse(Float64, numberMatch.match),
+            )
+        end
+    end
+
+    isempty(values) &&
+        error("Oxford data table contains no values")
+
+    return values
+end
+
+
+"""
+    decodeOxfordDataTable(page::AbstractString)
+
+Decode one real or imaginary NTUPLES data table.
+"""
+function decodeOxfordDataTable(page::AbstractString)
+    lines = split(page, "\n")
+
+    isempty(lines) &&
+        error("Oxford data table is empty")
+
+    headerLine = uppercase(strip(first(lines)))
+
+    hasRealMarker =
+        occursin(OXFORD_REAL_MARKER, headerLine)
+
+    hasImaginaryMarker =
+        occursin(OXFORD_IMAGINARY_MARKER, headerLine)
+
+    hasRealMarker == hasImaginaryMarker &&
+        error(
+            "Oxford data table header does not identify exactly one " *
+            "real or imaginary channel: $(first(lines))"
+        )
+
+    symbol =
+        hasImaginaryMarker ? "I" : "R"
+
+    contentLines =
+        [
+            strip(line)
+            for line in lines[2:end]
+            if !isempty(strip(line))
+        ]
+
+    isempty(contentLines) &&
+        error("Oxford data table contains no data lines")
+
+    values = parseOxfordDataValues(contentLines)
+
+    return symbol, values
+end
+
+
+"""
+    oxfordSymbols(records) -> Vector{String}
+
+Return the upper case NTUPLES symbols.
+"""
+function oxfordSymbols(
+    records::Dict{String,Vector{String}},
+)
+    symbols =
+        uppercase.(
+            splitOxfordList(
+                oxfordSingleValue(records, "SYMBOL"),
+            ),
+        )
+
+    isempty(symbols) &&
+        error("Oxford SYMBOL list is empty")
+
+    return symbols
+end
+
+
+"""
+    oxfordNumericList(records, key::String) -> Vector{Float64}
+
+Read one comma separated numeric NTUPLES list.
+"""
+function oxfordNumericList(
+    records::Dict{String,Vector{String}},
+    key::String,
+)
+    rawValues =
+        splitOxfordList(
+            oxfordSingleValue(records, key),
+        )
+
+    isempty(rawValues) &&
+        error("Oxford $key list is empty")
+
+    values = Float64[]
+
+    for rawValue in rawValues
+        value = tryparse(Float64, rawValue)
+
+        value === nothing &&
+            error(
+                "Oxford $key contains a nonnumeric value: $rawValue"
+            )
+
+        push!(values, value)
+    end
+
+    return values
+end
+
+
+"""
+    oxfordSymbolFactors(records) -> Tuple{Float64,Float64}
+
+Return the scaling factors for the real and imaginary channels.
+"""
+function oxfordSymbolFactors(
+    records::Dict{String,Vector{String}},
+)
+    symbols = oxfordSymbols(records)
+
+    factorRecords =
+        oxfordRecordValues(records, "FACTOR")
+
+    if isempty(factorRecords)
+        @warn(
+            "Oxford JCAMP DX file has no FACTOR list. Unit factors are used."
+        )
+
+        return 1.0, 1.0
+    end
+
+    length(factorRecords) == 1 ||
+        error(
+            "Oxford JCAMP DX block contains several FACTOR records"
+        )
+
+    factors =
+        oxfordNumericList(records, "FACTOR")
+
+    length(factors) == length(symbols) ||
+        error(
+            "Oxford FACTOR and SYMBOL lists differ in length"
+        )
+
+    realIndex = findfirst(==("R"), symbols)
+    imaginaryIndex = findfirst(==("I"), symbols)
+
+    realIndex === nothing &&
+        error("Oxford SYMBOL list has no R channel")
+
+    imaginaryIndex === nothing &&
+        error("Oxford SYMBOL list has no I channel")
+
+    return factors[realIndex], factors[imaginaryIndex]
+end
+
+
+"""
+    oxfordTimeUnitFactor(unit::AbstractString) -> Float64
+
+Return the factor that converts a supported time unit to seconds.
+"""
+function oxfordTimeUnitFactor(unit::AbstractString)
+    cleanUnit =
+        uppercase(strip(unit))
+
+    # "\u03bc" is Greek small mu and "\u00b5" is the micro sign. Both are
+    # used for microseconds, so both map to the ASCII letter U here.
+    cleanUnit =
+        replace(
+            cleanUnit,
+            "\u03bc" => "U",
+            "\u00b5" => "U",
+            " " => "",
+            "." => "",
+            "-" => "",
+            "_" => "",
+        )
+
+    if cleanUnit in (
+        "S",
+        "SEC",
+        "SECS",
+        "SECOND",
+        "SECONDS",
+    )
+        return 1.0
+
+    elseif cleanUnit in (
+        "MS",
+        "MSEC",
+        "MSECS",
+        "MILLISECOND",
+        "MILLISECONDS",
+    )
+        return 1e-3
+
+    elseif cleanUnit in (
+        "US",
+        "USEC",
+        "USECS",
+        "MICROSECOND",
+        "MICROSECONDS",
+    )
+        return 1e-6
+
+    elseif cleanUnit in (
+        "NS",
+        "NSEC",
+        "NSECS",
+        "NANOSECOND",
+        "NANOSECONDS",
+    )
+        return 1e-9
+    end
+
+    error(
+        "Unsupported Oxford FID time unit: $unit"
+    )
+end
+
+
+"""
+    parseOxfordDeclaredInteger(value::AbstractString) -> Int
+
+Parse a dimension value that must represent a nonnegative integer.
+"""
+function parseOxfordDeclaredInteger(
+    value::AbstractString,
+)
+    integerValue = tryparse(Int, strip(value))
+
+    if integerValue !== nothing
+        integerValue >= 0 ||
+            error(
+                "Oxford dimension must not be negative: $value"
+            )
+
+        return integerValue
+    end
+
+    floatValue = tryparse(Float64, strip(value))
+
+    floatValue === nothing &&
+        error(
+            "Oxford dimension is not numeric: $value"
+        )
+
+    isfinite(floatValue) && isinteger(floatValue) ||
+        error(
+            "Oxford dimension is not an integer: $value"
+        )
+
+    floatValue >= 0 ||
+        error(
+            "Oxford dimension must not be negative: $value"
+        )
+
+    return Int(floatValue)
+end
+
+
+"""
+    validateOxfordDeclaredPoints(records, npoints)
+
+Check VARDIM and NPOINTS when those records are present.
+"""
+function validateOxfordDeclaredPoints(
+    records::Dict{String,Vector{String}},
+    npoints::Integer,
+)
+    symbols = oxfordSymbols(records)
+
+    vardimRecords =
+        oxfordRecordValues(records, "VARDIM")
+
+    if !isempty(vardimRecords)
+        length(vardimRecords) == 1 ||
+            error(
+                "Oxford JCAMP DX block contains several VARDIM records"
+            )
+
+        dimensions =
+            parseOxfordDeclaredInteger.(
+                splitOxfordList(first(vardimRecords)),
+            )
+
+        length(dimensions) == length(symbols) ||
+            error(
+                "Oxford VARDIM and SYMBOL lists differ in length"
+            )
+
+        for symbol in ("X", "R", "I")
+            index = findfirst(==(symbol), symbols)
+
+            index === nothing &&
+                error(
+                    "Oxford SYMBOL list has no $symbol entry"
+                )
+
+            dimensions[index] == npoints ||
+                error(
+                    "Oxford VARDIM for $symbol is " *
+                    "$(dimensions[index]) but $npoints points were read"
+                )
+        end
+    end
+
+    npointRecords =
+        oxfordRecordValues(records, "NPOINTS")
+
+    if !isempty(npointRecords)
+        length(npointRecords) == 1 ||
+            error(
+                "Oxford JCAMP DX block contains several NPOINTS records"
+            )
+
+        declaredPoints =
+            parseOxfordDeclaredInteger(
+                first(npointRecords),
+            )
+
+        declaredPoints == npoints ||
+            error(
+                "Oxford NPOINTS is $declaredPoints but " *
+                "$npoints points were read"
+            )
+    end
+
+    return nothing
+end
+
+
+"""
+    oxfordTimeAxis(records, npoints) -> AbstractRange
+
+Build the acquisition time coordinate in seconds.
+"""
+function oxfordTimeAxis(
+    records::Dict{String,Vector{String}},
+    npoints::Integer,
+)
+    npoints >= 2 ||
+        error(
+            "Oxford FID must contain at least two complex points"
+        )
+
+    symbols =
+        oxfordSymbols(records)
+
+    firstValues =
+        oxfordNumericList(records, "FIRST")
+
+    lastValues =
+        oxfordNumericList(records, "LAST")
+
+    length(firstValues) == length(symbols) ||
+        error(
+            "Oxford FIRST and SYMBOL lists differ in length"
+        )
+
+    length(lastValues) == length(symbols) ||
+        error(
+            "Oxford LAST and SYMBOL lists differ in length"
+        )
+
+    xIndex =
+        findfirst(==("X"), symbols)
+
+    xIndex === nothing &&
+        error("Oxford SYMBOL list has no X time column")
+
+    xUnit = nothing
+
+    unitRecords =
+        oxfordRecordValues(records, "UNITS")
+
+    if !isempty(unitRecords)
+        length(unitRecords) == 1 ||
+            error(
+                "Oxford JCAMP DX block contains several UNITS records"
+            )
+
+        units =
+            splitOxfordList(first(unitRecords))
+
+        if xIndex <= length(units)
+            candidateUnit =
+                strip(units[xIndex])
+
+            if !isempty(candidateUnit)
+                xUnit = candidateUnit
+            end
+        end
+    end
+
+    if xUnit === nothing
+        xUnitRecords =
+            oxfordRecordValues(records, "XUNITS")
+
+        if !isempty(xUnitRecords)
+            length(xUnitRecords) == 1 ||
+                error(
+                    "Oxford JCAMP DX block contains several XUNITS records"
+                )
+
+            xUnit =
+                strip(first(xUnitRecords))
+        end
+    end
+
+    xUnit === nothing &&
+        error(
+            "Oxford JCAMP DX file does not specify the X time unit"
+        )
+
+    unitFactor =
+        oxfordTimeUnitFactor(xUnit)
+
+    firstTime =
+        firstValues[xIndex] * unitFactor
+
+    lastTime =
+        lastValues[xIndex] * unitFactor
+
+    isfinite(firstTime) && isfinite(lastTime) ||
+        error(
+            "Oxford time limits are not finite"
+        )
+
+    lastTime > firstTime ||
+        error(
+            "Oxford FID time axis is not increasing"
+        )
+
+    return range(
+        firstTime,
+        stop=lastTime,
+        length=npoints,
+    )
+end
+
+
+"""
+    parseOxfordMetadataValue(key, value)
+
+Convert a simple metadata value to the same numeric and text types used
+by the other NMRflux readers.
+"""
+function parseOxfordMetadataValue(
+    key::String,
+    value::AbstractString,
+)
+    cleanValue = strip(value)
+
+    if key in OXFORD_LIST_KEYS
+        items = splitOxfordList(cleanValue)
+
+        parsedItems =
+            [numparse(item) for item in items]
+
+        return parsedItems
+    end
+
+    return numparse(cleanValue)
+end
+
+
+"""
+    oxfordParameterDictionary(records) -> Dict{String,Any}
+
+Convert the selected Oxford JCAMP DX block to a typed parameter
+dictionary. Data tables are not copied into the metadata.
+"""
+function oxfordParameterDictionary(
+    records::Dict{String,Vector{String}},
+)
+    params = Dict{String,Any}()
+
+    for (key, values) in records
+        key == OXFORD_DATA_TABLE_KEY && continue
+
+        typedValues =
+            [
+                parseOxfordMetadataValue(key, value)
+                for value in values
+            ]
+
+        params[key] =
+            length(typedValues) == 1 ?
+            first(typedValues) :
+            typedValues
+    end
+
+    return params
+end
+
+
+"""
+    readOxfordFID(s::String)
+
+Read one complex uncompressed Oxford JCAMP DX FID.
+
+The return values are the selected raw record dictionary, the time
+coordinate in seconds, and a Vector of ComplexF64 values.
+"""
+function readOxfordFID(s::String)
+    blocks = readOxfordBlocks(s)
+    records = selectOxfordFidBlock(blocks)
+
+    dataTables =
+        oxfordRecordValues(
+            records,
+            OXFORD_DATA_TABLE_KEY,
+        )
+
+    isempty(dataTables) &&
+        error(
+            "Oxford NMR FID block contains no DATATABLE records: $s"
+        )
+
+    realValues = nothing
+    imaginaryValues = nothing
+
+    for dataTable in dataTables
+        symbol, values =
+            decodeOxfordDataTable(dataTable)
+
+        if symbol == "R"
+            realValues === nothing ||
+                error(
+                    "Oxford file contains several real data tables. " *
+                    "Arrayed or multidimensional data is not supported."
+                )
+
+            realValues = values
+
+        elseif symbol == "I"
+            imaginaryValues === nothing ||
+                error(
+                    "Oxford file contains several imaginary data tables. " *
+                    "Arrayed or multidimensional data is not supported."
+                )
+
+            imaginaryValues = values
+        end
+    end
+
+    realValues === nothing &&
+        error(
+            "Oxford NMR FID contains no real data table: $s"
+        )
+
+    imaginaryValues === nothing &&
+        error(
+            "Oxford NMR FID contains no imaginary data table: $s"
+        )
+
+    length(realValues) == length(imaginaryValues) ||
+        error(
+            "Oxford real and imaginary data tables differ in length. " *
+            "Real contains $(length(realValues)) points and imaginary " *
+            "contains $(length(imaginaryValues)) points: $s"
+        )
+
+    all(isfinite, realValues) ||
+        error(
+            "Oxford real data contains a nonfinite value: $s"
+        )
+
+    all(isfinite, imaginaryValues) ||
+        error(
+            "Oxford imaginary data contains a nonfinite value: $s"
+        )
+
+    numberOfPoints = length(realValues)
+
+    validateOxfordDeclaredPoints(
+        records,
+        numberOfPoints,
+    )
+
+    realFactor, imaginaryFactor =
+        oxfordSymbolFactors(records)
+
+    complexData =
+        ComplexF64.(
+            realValues .* realFactor,
+            imaginaryValues .* imaginaryFactor,
+        )
+
+    all(isfinite, real.(complexData)) &&
+        all(isfinite, imag.(complexData)) ||
+        error(
+            "Oxford scaling produced a nonfinite complex value: $s"
+        )
+
+    timeAxis =
+        oxfordTimeAxis(
+            records,
+            numberOfPoints,
+        )
+
+    return records, timeAxis, complexData
+end
+
+
+"""
+    resolveOxfordJcampFile(s::String) -> String
+
+Resolve a direct JCAMP DX file path or a directory containing exactly
+one supported JCAMP DX file.
+"""
+function resolveOxfordJcampFile(s::String)
+    if isfile(s)
+        extension = lowercase(splitext(s)[2])
+
+        extension in OXFORD_FILE_EXTENSIONS ||
+            error(
+                "Oxford file does not use a supported JCAMP DX extension: $s"
+            )
+
+        return s
+    end
+
+    isdir(s) ||
+        error(
+            "Oxford path is neither a JCAMP DX file nor a directory: $s"
+        )
+
+    candidates =
+        sort(
+            filter(
+                name ->
+                    lowercase(splitext(name)[2]) in
+                    OXFORD_FILE_EXTENSIONS,
+                readdir(s),
+            ),
+        )
+
+    isempty(candidates) &&
+        error(
+            "No supported JCAMP DX file was found in Oxford directory: $s"
+        )
+
+    length(candidates) == 1 ||
+        error(
+            "Several JCAMP DX files were found in Oxford directory. " *
+            "Pass the required file path directly. Candidates: " *
+            join(candidates, ", ")
+        )
+
+    return joinpath(s, first(candidates))
+end
 
 
 # Adapted with thanks from jeolconverter.js (https://github.com/bjonnh/jeolconverter)

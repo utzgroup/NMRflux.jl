@@ -1,70 +1,105 @@
-# 1. Working with SpectData
-`SpectData` is the central data structure in NMRflux.jl. It stores an N-dimensional numerical data array, and one coordinate vector for each dimension, and is defined as a subtype of `AbstractArray{T,N}`. This means that `SpectData` behaves like a regular Julia array in most contexts: it supports indexing, slicing, broadcasting, and can be passed to most numerical functions that expect an array.
+# Working with SpectData
 
-For reference, the type is defined as:
+`SpectData` is the central data representation in `NMRflux.jl`. It holds an N dimensional numerical array together with one coordinate vector per dimension, and it subtypes `AbstractArray{T,N}`.
+
 ```julia
 struct SpectData{T,N} <: AbstractArray{T,N}
-dat::AbstractArray{T,N}
-coord::NTuple{N,AbstractVector}
+    dat::AbstractArray{T,N}
+    coord::NTuple{N,AbstractVector}
 end
 ```
 
-## 1.1 Loading a simple JOEL dataset
-```@example joelEg
+Because it implements the Julia array interface, ordinary indexing, slicing and broadcasting all work on it directly, and it can be passed to functions that expect an array. The point of the type is bookkeeping: the values and the physical axes travel together, so no processing step has to be told what its own x axis is.
+
+## 1. Loading a JEOL example
+
+```@example JEOLEg
 using NMRflux
 using NMRflux.Examples
-
-using Plots
+using Plots: plot, savefig
 
 data_jeol = NMRflux.Examples.Data["Spheroid culture medium"]
-jdf_file  = joinpath(data_jeol["path"], "yp-5-fu-2.5-100.jdf")
+jdf_file = joinpath(data_jeol["path"], "yp-5-fu-2.5-100.jdf")
 
 params_jeol, data_td_jeol = NMRflux.load(jdf_file, :JEOL)
 
-t_jeol = data_td_jeol.coord[1]    # time axis (s)
-y_jeol = real.(data_td_jeol.dat)  # real part
+plot(coords(data_td_jeol, 1), real.(data_td_jeol.dat);
+    xlabel = "time / s",
+    ylabel = "signal (a.u.)",
+    title = "JEOL FID (real part)"
+    )
 
-plot(t_jeol, y_jeol;
-xlabel = "time / s",
-ylabel = "signal (a.u.)",
-title = "JEOL FID (real part)")
-
-savefig("jeol_fid_plot.svg"); nothing
+savefig("spectdata_jeol_fid.svg"); nothing # hide
 ```
-![](jeol_fid_plot.svg)
 
-The returned data from above is of type `SpectData`:
-```@example joelEg
+![](spectdata_jeol_fid.svg)
+
+```@example JEOLEg
 typeof(data_td_jeol)
 ```
 
-## 1.2 Basic indexing
-`SpectData` can be indexed just like a normal array. When you index with a range, you obtain a `SpectData` view with the corresponding subset of the data and coordinates:
-```@example joelEg
-data_td_jeol[1:5] # SpectData containing the first 5 complex points
+## 2. Reading the coordinates
+
+`coords(S)` returns the full tuple of coordinate vectors and `coords(S, k)` returns the coordinate of dimension `k`. Both are exported, and both read the same `coord` field you can reach directly.
+
+```@example JEOLEg
+t_axis = coords(data_td_jeol, 1)
+(first(t_axis), last(t_axis), length(t_axis))
 ```
 
-To access the underlying numerical values directly, you can use the `dat` field or broadcasted operations:
-```@example joelEg
-data_td_jeol.dat[1:5]     # first 5 complex values as a plain array
-real.(data_td_jeol)[1:5]  # real part of first 5 points
-imag.(data_td_jeol)[1:5]  # imaginary part of first 5 points
+Reading `S.coord[k]` gives the same vector. This documentation uses whichever form is clearer in context.
+
+## 3. Indexing and slicing
+
+A range returns a new `SpectData` carrying the matching slice of the coordinate:
+
+```@example JEOLEg
+data_td_jeol[1:5]
 ```
 
-Multi dimensional `SpectData` objects behave analogously, with size and indexing following standard Julia conventions.
+Integer indices are dropped from the coordinate tuple, exactly as they are dropped from the array shape. Slicing a two dimensional dataset at a fixed row therefore hands back a one dimensional `SpectData` with the correct remaining axis. The raw values stay available through `dat`:
 
-## 1.3 Internal structure
-For a 1D `SpectData` object such as `data_td_jeol`, the two fields are:
-- `data_td_jeol.dat` the underlying AbstractArray{T,1} holding the numerical data values
-(e.g. a complex FID or spectrum)
-- `data_td_jeol.coord` a 1-tuple of coordinate vectors, one per dimension. For 1D data,
-coord[1] is the time axis (for FIDs) or frequency axis (for spectra)
-
-For a 1D time domain FID:
-```@example joelEg
-data_array = data_td_jeol.dat   # numerical array (complex FID)
-t_axis = data_td_jeol.coord[1]  # time axis
-(first(t_axis), last(t_axis))
+```@example JEOLEg
+data_td_jeol.dat[1:5]
 ```
 
-In higher dimensions (e.g. 2D or 3D spectra), dat becomes an N-dimensional array, and coord[k] stores the coordinate vector (time, frequency, ppm, etc.) for the k-th dimension. Thus SpectData always keeps the numerical values and their physical axes together in a single coherent object. Conversion to frequency domain spectra (FFT, shifting, phasing, etc.) is handled by the processing tools described in the following sections.
+Broadcasts work directly on the object and preserve the coordinates. `real.(S)` comes back as a `SpectData`, not a bare array, and `imag.` behaves the same way:
+
+```@example JEOLEg
+real.(data_td_jeol)[1:5]
+```
+
+## 4. Building a SpectData by hand
+
+The two argument constructor takes the data and a tuple of coordinates, one per dimension:
+
+```@example JEOLEg
+n = 8
+SpectData(collect(1.0:n), (range(0.0, step=0.1, length=n),))
+```
+
+The single argument constructor fills in unit ranges, which is what processors use internally when they are handed a plain array:
+
+```@example JEOLEg
+SpectData(collect(1.0:4.0))
+```
+
+## 5. Higher dimensions
+
+For an N dimensional dataset, `dat` becomes an N dimensional array and `coord[k]` holds the physical coordinate for dimension `k`. `FourierTransform` replaces the transformed axis with a frequency axis, `ZeroFill` extends it, and every other processor passes the coordinates through untouched.
+
+```@example JEOLEg
+S2 = SpectData(reshape(collect(1.0:12.0), 4, 3),
+    (range(0.0, step=0.25, length=4), range(-1.0, step=1.0, length=3)))
+
+coords(S2)
+```
+
+Slicing it at a fixed row drops the first coordinate and keeps the second:
+
+```@example JEOLEg
+row = S2[2, :]
+(size(row.dat), coords(row, 1))
+```
+
+The processors that consume these objects are covered in [Classical Processing Pipeline](DataProcessing.md).

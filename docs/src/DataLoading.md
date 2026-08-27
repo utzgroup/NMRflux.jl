@@ -1,194 +1,172 @@
-# 1. Loading NMR Data
-`NMRflux.jl` provides:
-Low level, vendor specific readers in the submodule `NMRflux.FileIO`. These work directly with Bruker and JEOL file formats and return raw time domain arrays and parameter dictionaries. High level processing tools that operate on `SpectData` objects created from these raw arrays. For convenience, `NMRflux.jl` comes with example datasets that can be used in the documentation and in interactive sessions.
+# Loading NMR Data
 
-## 1.1 Example datasets
-The example data are stored in the dictionary `NMRflux.Examples.Data`.
+`NMRflux.jl` separates vendor specific file parsing from the common data representation used by the rest of the framework. The `NMRflux.FileIO` submodule holds the low level vendor readers. Each one returns the time domain data together with the headers and parameter records the file carries, in whatever shape the format dictates, so the return values differ from vendor to vendor. The high level `NMRflux.load` interface sits on top of them and converts a supported dataset into a single `SpectData` representation that the processing tools understand. The package also ships small example datasets, and the runnable examples on this page all use one of them.
+
+## 1. Supported vendor formats
+
+| Vendor | Files read | Selector |
+|---|---|---|
+| Bruker | `fid`, `acqus` | `:Bruker` |
+| JEOL | `.jdf` | `:JEOL` |
+| Magritek Spinsolve | `data.1d`, `acqu.par` | `:Magritek` |
+| Varian/Agilent | `fid`, `procpar` | `:Varian` |
+| Oxford Instruments | `.dx`, `.jdx` (JCAMP-DX) | `:Oxford` |
+
+Agilent datasets use the `:Varian` selector.
+
+The first argument of `NMRflux.load` is not the same kind of path for every vendor:
+
+| Selector | What the path must point to |
+|---|---|
+| `:Bruker` | the experiment directory holding `acqus` and `fid`, for example `.../10` |
+| `:JEOL` | the `.jdf` file itself |
+| `:Magritek` | the directory holding `acqu.par` and `data.1d` |
+| `:Varian` | the directory holding `procpar` and `fid` |
+| `:Oxford` | the `.dx` or `.jdx` file, or a directory containing exactly one such file |
+
+The Bruker, Magritek, Varian, and Oxford routes handle one dimensional data only. The Varian reader is deliberately strict: it multiplies the block count by the trace count and refuses anything other than a single trace, so arrayed and multidimensional Varian experiments are not silently truncated.
+
+!!! note "Multidimensional JEOL data"
+    The JEOL reshaping code generalises to more than one dimension and reads the section layout from the file header. The two dimensional section ordering has not yet been checked against a real two dimensional JEOL dataset, so two dimensional JEOL loading is provisional. A mirrored indirect dimension after Fourier transformation is the symptom to watch for.
+
+## 2. Example datasets
+
+The example data live in `NMRflux.Examples.Data`. Each entry holds the contents of that dataset's `example.toml`, plus two keys added when the module loads: `"path"`, the dataset directory, and `"files"`, the full paths of everything in that directory apart from the TOML file itself.
 
 ```@example brukerEg
 using NMRflux
 using NMRflux.Examples
 
 data_bruker = NMRflux.Examples.Data["HCC cell culture media spectra"]
+keys(data_bruker)
 ```
 
-```@example joelEg
+```@example jeolEg
 using NMRflux
 using NMRflux.Examples
 
-data_joel = NMRflux.Examples.Data["Spheroid culture medium"]
+data_jeol = NMRflux.Examples.Data["Spheroid culture medium"]
+keys(data_jeol)
 ```
 
-## 1.2 Bruker Data High-level (recommended)
-For most use cases, Bruker data can be loaded via the high-level `load` function, which returns both the acquisition parameters and a time domain
-`SpectData` object:
+Use `keys(NMRflux.Examples.Data)` to list everything that ships with the package.
+
+## 3. Bruker data through the high level interface
+
+For most work, load Bruker data with `NMRflux.load`. It returns the acquisition parameters and a time domain `SpectData` object.
 
 ```@example brukerEg
-data_bruker = NMRflux.Examples.Data["HCC cell culture media spectra"]
-params_bruker, data_td_bruker = NMRflux.load(joinpath(data_bruker["path"], "10"), :Bruker)
+params_bruker, data_td_bruker =
+    NMRflux.load(joinpath(data_bruker["path"], "10"), :Bruker)
 
-(params_bruker["SW_h"], size(data_td_bruker))
+(params_bruker["SW_h"], size(data_td_bruker.dat))
 ```
-Here:
-- `params_bruker` is a dictionary of acquisition parameters parsed from `acqus`.
-- `data_td_bruker` is a `SpectData` object containing the time domain FID with an
-  appropriate time axis.
 
-Internally, `NMRflux.load(path, :Bruker)`:
-- Reads acqus and fid using `NMRflux.FileIO`
-- Applies the Bruker group-delay correction using the parameter `GRPDLY`
-- Constructs the time axis from the sweep width `SW_h`.
+The Bruker path parses `acqus`, reads the interleaved `fid`, keeps the FID from index `GRPDLY` onwards to remove the digital filter group delay, and builds the time coordinate from the sweep width `SW_h`.
 
-This saves users from manually computing the dwell time and axis. The loaded FID can be inspected as:
 ```@example brukerEg
 using Plots: plot, savefig
 
-t = data_td_bruker.coord[1]
-y = real.(data_td_bruker.dat)
+plot(coords(data_td_bruker, 1), real.(data_td_bruker.dat);
+    xlabel = "time / s",
+    ylabel = "signal (a.u.)",
+    title = "Bruker FID (real part)"
+    )
 
-plot(t, y, xlabel = "time / s", ylabel = "signal (a.u.)", title  = "Bruker FID (real part) - High level loading") # Plot the real part of the FID
-savefig("bruker_fid_hl_plot.svg"); nothing # Save figure for Documenter
+savefig("bruker_fid_hl_plot.svg"); nothing # hide
 ```
 ![](bruker_fid_hl_plot.svg)
 
-## 1.3 Bruker Data (Low-level FileIO)
-Power users can work with the low-level Bruker readers in `NMRflux.FileIO`. These functions operate directly on the raw Bruker files (fid, acqus, etc.)
-and return:
+`coords(S, k)` is the public accessor for the coordinate of dimension `k`, and it is equivalent to reading `S.coord[k]` directly.
 
-- A complex FID as a Julia vector
-- A dictionary of acquisition parameters
+## 4. Bruker data through FileIO
 
-Using the same example dataset as above, we can read the FID as follows:
+The underlying readers are available when you need the raw header values or want to control the conversion yourself.
 
 ```@example brukerEg
-using NMRflux.FileIO
-
 fid_bruker = NMRflux.FileIO.readBrukerFID(joinpath(data_bruker["path"], "10", "fid"))
+params_raw = NMRflux.FileIO.readBrukerParameterFile(joinpath(data_bruker["path"], "10", "acqus"))
+length(fid_bruker)
 ```
 
-The `fid_bruker` is a `Vector{ComplexF64}` containing the complex time domain data points stored in the Bruker fid file. For older TopSpin 2.0 data, the FID is stored as 32-bit integers; in that case you can specify the format:
+`readBrukerFID` defaults to `format=Float64`, which is correct for TopSpin 4.0 and later. Data written by TopSpin 2.0 needs `format=Int32`. Building the time coordinate from `SW_h` gives a `SpectData` object equivalent to the one returned by `NMRflux.load`, with one difference: the low level route returns the full FID, including the group delay points that the high level route removes.
+
 ```@example brukerEg
-#fid_bruker_old = NMRflux.FileIO.readBrukerFID("fid"; format = Int32) # Example call for TopSpin 2.0 data
-nothing
+dwell = 1 / params_raw["SW_h"]
+time_axis = range(0.0, step=dwell, length=length(fid_bruker))
+
+fid_raw_bruker = SpectData(fid_bruker, (time_axis,))
+(dwell, size(fid_raw_bruker.dat), size(data_td_bruker.dat))
 ```
 
-The acquisition parameters are stored in Bruker JCAMP-DX files such as acqus. We can read them using:
-```@example brukerEg
-params_bruker = NMRflux.FileIO.readBrukerParameterFile(joinpath(data_bruker["path"], "10", "acqus"))
-```
+The two objects differ in length by the number of group delay points that `NMRflux.load` discards.
 
-The `params_bruker` is a `Dict{String,Any}` in which:
-- Numeric scalar values are automatically parsed as `Int64` or `Float64`
-- Non-numeric scalars remain as `String`
-- Array parameters (such as `D0`, `D1`, etc) are returned as Julia vectors whose elements 
-are parsed in the same way (`integer`, `float`, or `string`)
+## 5. JEOL data through the high level interface
 
-Bruker array parameters such as `D0`, `D1`, etc are stored in a single vector `params_bruker["D"]`. Because Julia arrays are 1-based, `D0` corresponds to index `1`, `D1` to index `2`, and so on:
-```@example brukerEg
-(params_bruker["D"][1], params_bruker["D"][2])  # D0, D1
-```
+A JEOL `.jdf` file keeps the header, the acquisition parameters, and the binary data together in a single file, so `NMRflux.load` takes the file path directly.
 
-An important example is the sweep width in Hz, stored in the parameter `SW_h`. The dwell time (sampling interval) is its inverse, and can be used to construct a time axis:
-```@example brukerEg
-dwell     = 1 / params_bruker["SW_h"]                  # s per point
-time_axis = (0:length(fid_bruker)-1) .* dwell          # explicit time vector
-(dwell, length(time_axis))
-```
+```@example jeolEg
+using Plots: plot, savefig
 
-The same example can be used to quickly inspect the loaded FID:
-```@example brukerEg
-plot(time_axis, real(fid_bruker), xlabel = "time / s", ylabel = "signal (a.u.)", title  = "Bruker FID (real part) - Low level loading") # Plot the real part of the FID
-savefig("bruker_fid_plot.svg"); nothing # Save figure for Documenter
-```
-![](bruker_fid_plot.svg)
-
-With the FID and time axis defined, a time domain `SpectData` object can be constructed as:
-```@example brukerEg
-data_td_bruker = SpectData(fid_bruker, (time_axis,))
-```
-
-## 1.4 JEOL Data High-level loading (recommended)
-JEOL `.jdf` files contain acquisition parameters and binary data in a single file. JEOL datasets can be loaded using the unified high level loader NMRflux.load, which returns both the acquisition parameters and a time domain `SpectData` object. Most users can load JEOL data using:
-
-```@example joelEg
-using Plots
-
-data_jeol = NMRflux.Examples.Data["Spheroid culture medium"]
-jdf_file  = joinpath(data_jeol["path"], "yp-5-fu-2.5-100.jdf")
-
+jdf_file = joinpath(data_jeol["path"], "yp-5-fu-2.5-100.jdf")
 params_jeol, data_td_jeol = NMRflux.load(jdf_file, :JEOL)
 
-t_jeol = data_td_jeol.coord[1]    # time axis (s)
-y_jeol = real.(data_td_jeol.dat)  # real part
+plot(coords(data_td_jeol, 1), real.(data_td_jeol.dat);
+    xlabel = "time / s",
+    ylabel = "signal (a.u.)",
+    title = "JEOL FID (real part)"
+    )
 
-plot(t_jeol, y_jeol;
-xlabel = "time / s",
-ylabel = "signal (a.u.)",
-title = "JEOL FID (real part)")
-
-savefig("jeol_fid_plot.svg"); nothing
+savefig("jeol_fid_plot.svg"); nothing # hide
 ```
 ![](jeol_fid_plot.svg)
 
-The returned values are:
-- `params_jeol` :: `Dict{String,Any}`. A dictionary of JEOL acquisition parameters where each entry is stored as a tuple (scaler, units, value)
-- `data_td_jeol` :: `SpectData{ComplexF64,1}` (or `SpectData{ComplexF32,1}` depending on the file). A `SpectData` object containing the reconstructed complex FID and its time axis
+The loader reads the header and parameter blocks, splits the flat data buffer into its real and imaginary sections, combines them using the JEOL conjugate convention, and builds each coordinate axis from the stored `dataAxisStart`, `dataAxisStop`, and `dataPoints` entries.
 
-The high level loader performs all low level steps automatically:
-- Reads the JEOL header and parameter blocks
-- Reconstructs complex time domain data from the stored real/imaginary vectors
-- Constructs the correct time axis from the digitization rate in `X_SWEEP`
-- Returns a ready-to-use `SpectData` for downstream processing
+## 6. JEOL data through FileIO
 
-```@example joelEg
-params_jeol, data_td_jeol = NMRflux.load(jdf_file, :JEOL)
-(size(data_td_jeol), params_jeol["X_SWEEP"][3])
+`readJEOL` takes an open stream and returns the header, the parameter dictionary, and the flat data vector. Passing it to `open` as below hands it the stream and closes the file afterwards.
+
+```@example jeolEg
+header_jeol, params_jeol, raw_jeol = open(NMRflux.FileIO.readJEOL, jdf_file)
+(header_jeol["dims"], header_jeol["dataAxisType"][1], length(raw_jeol))
 ```
 
-## 1.5 JEOL data (low-level FileIO)
-For advanced use, the low-level JEOL reader in `NMRflux.FileIO` provides direct access to all parts of the .jdf file:
+For a one dimensional complex JEOL FID the buffer holds all real values followed by all imaginary values, and the imaginary section carries a factor of `-im`:
 
-```@example joelEg
-header_jeol, params_jeol, data_jeol = NMRflux.FileIO.readJEOL(open(jdf_file))
+```@example jeolEg
+n = length(raw_jeol)
+cdata = raw_jeol[1:(n >> 1)] - im * raw_jeol[((n >> 1) + 1):end]
+length(cdata)
 ```
 
-This function returns:
-- `header_jeol`: a dictionary with file-level metadata (axes, units, base frequencies, etc.)
-- `params_jeol`: a dictionary of JEOL acquisition parameters where each entry is a (scaler, units, value) tuple
-- `data_jeol`: a 1-D vector of `Vector{Float32}` or `Vector{Float64}` containing the stored data (real part followed by imaginary part) with the layout:
+Acquisition parameters are stored as tuples of the form `(scaler, units, value)`, so the numerical value sits in the third slot. The same dictionary also carries four block header entries, `parameterSize`, `lowIndex`, `highIndex` and `totalSize`, which are plain integers.
 
-```markdown markdownEg
-[ Re1, Re2, Re3, ..., ReN,  Im1, Im2, Im3, ..., ImN ]
+```@example jeolEg
+dwell = 1.0 / params_jeol["X_SWEEP"][3]
+time_axis = range(0.0, step=dwell, length=length(cdata))
+
+fid_raw_jeol = SpectData(cdata, (time_axis,))
+size(fid_raw_jeol.dat)
 ```
 
-Some of the metadata fields available in the `JEOL` header include:
-```@example joelEg
-# header_jeol["dataAxisStart"]
-# header_jeol["dataAxisStop"]
-# header_jeol["dataPoints"]
-# header_jeol["baseFreq"]
-header_jeol["zeroPoint"]
+!!! warning "Parameter scalers"
+    The first element of a JEOL parameter tuple is a decimal scaler that the reader stores but never applies, so any parameter used quantitatively needs it applied by hand. `reshapeJEOL` sidesteps the question: it builds its axes from the header, not from the parameter block, which makes the high level route the safer one for multidimensional data.
+
+## 7. The remaining vendors
+
+Magritek Spinsolve, Varian/Agilent, and Oxford Instruments data follow the same pattern:
+
+```julia
+params_magritek, data_magritek = NMRflux.load(magritek_dir, :Magritek)
+params_varian,   data_varian   = NMRflux.load(varian_dir,   :Varian)
+params_oxford,   data_oxford   = NMRflux.load(oxford_file,  :Oxford)
 ```
 
-## 1.6 Reconstructing complex FID data
-To reconstruct complex FID values, we split this vector into real and imaginary halves and combine them:
-```@example joelEg
-n     = length(data_jeol)
-cdata = data_jeol[1:n>>1] - im * data_jeol[n>>1+1:end]
-```
+- For Magritek data the time coordinate comes from the `bandwidth` field of `acqu.par`, which `NMRflux.load` converts from kHz to Hz. `readMagritekFID` also returns the time axis stored in the file. That axis is a useful cross check, but it is not the one that ends up in the `SpectData` object.
 
-The `cdata` is now a complex vector containing the time domain JEOL FID.
+- Varian data works the same way, with the coordinate taken from the `sw` field of `procpar`. Here `NMRflux.load` also compares `np` against the number of points actually present in the binary file and warns when the two disagree.
 
-## 1.7 Constructing a time axis
-JEOL digitization information is stored in the `X_SWEEP` parameter. The sweep width is typically in the third element:
-```@example joelEg
-dwell     = 1.0 / params_jeol["X_SWEEP"][3]
-time_axis = range(0.0, step = dwell, length = length(cdata))
-```
+- Oxford is the exception. The JCAMP-DX reader reconstructs the time axis from the `FIRST` and `LAST` records, with the unit read from `UNITS` or `XUNITS`, and `NMRflux.load` uses that axis directly.
 
-## 1.8 Constructing a SpectData object
-```@example joelEg
-data_td_jeol = SpectData(cdata, (time_axis,))
-```
-
-The acquisition parameters (`params_jeol`) and header information (`header_jeol`) may be stored alongside the `SpectData` object to keep all metadata available for processing.
+Every route on this page ends with the same object, whichever layer you used to get there. [Working with SpectData](SpectData.md) covers what you can do with it.

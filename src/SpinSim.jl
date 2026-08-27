@@ -5,7 +5,6 @@ provides simple functionality for time-domain and frequency-domain simulations o
 High-level routines for generating strong- and weak coupling terms for spin-1/2 systems are provided. Kronecker products
 are opened, but are represented as sparse matrices. Simulations with up to about 25 spins are practical.
 """
-
 module SpinSim
 
 #using NMR.PauliMatrix

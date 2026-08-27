@@ -1,66 +1,38 @@
-*A Julia framework for processing, simulating, and denoising NMR data*
+# NMRflux.jl
 
-# NMRflux.jl - Overview
+*A modular Julia framework for NMR data handling, processing, and simulation*
 
-## Package Features
+`NMRflux.jl` provides a common Julia framework for handling, processing, simulating, and interpreting NMR data. The package grew out of practical need for a julia package for NMR spectroscopy: reliable vendor aware data loading, coordinate aware data representation, composable processing pipelines, and spin dynamics simulation. The same array oriented interfaces also make it straightforward to hand NMR data to external Julia libraries, machine learning packages included, without introducing a second data model along the way.
 
-- Vendor-neutral loading of NMR data (e.g. Bruker, JEOL) into a unified `SpectData` format.
-- Well-structured `SpectData` type that subtypes `AbstractArray` and carries axes and metadata.
-- Classical NMR processing tools: Fourier transform, apodization, baseline and phase correction, slicing, etc.
-- Spin dynamics simulations based on sparse matrix representations of the spin Hamiltonian and density operator (`SpinSim.jl`).
-- Synthetic FID generation pipeline for method development and machine learning.
-- Integrated machine learning workflows for spectral denoising using Flux based models.
+## Package features
+
+- Vendor neutral loading of Bruker, JEOL, Magritek Spinsolve, Varian/Agilent, and Oxford Instruments data into the common `SpectData` representation.
+- A coordinate aware `SpectData` type that subtypes `AbstractArray` and keeps numerical data together with its physical axes.
+- Composable processing tools covering zero filling, apodization, Fourier transformation, manual and automatic phase correction, baseline correction, differentiation, cumulative integration, and peak alignment..
+- Spin dynamics simulation through the general purpose `SpinSim` module, with `GISSMO` on top of it for parametrised spin systems from the GISSMO database.
+- Extensible processing abstractions designed for custom algorithms and for integration with external machine learning workflows.
+- A worked machine learning use case, RINSE, developed and distributed separately, showing how the public NMRflux interfaces support a complete learning workflow.
+
+!!! note "Scope and applications"
+    NMRflux.jl provides the general data, processing, and simulation framework. Application specific workflows can build on these public interfaces without becoming part of the core package. RINSE appears in this documentation as one such demonstrator. It is developed and distributed separately from NMRflux.jl.
 
 ## Contents
 
 ```@contents
 ```
 
-`NMRflux.jl` is a library for the processing, simulation, and interpretation of NMR
-data. It is the successor of an earlier toolkit (`NMR.jl`) developed in
-the Utz group and is intended to provide a more coherent, extensible, and
-well-documented framework.
+## Manual outline
 
-The package grew out of concrete research needs in NMR spectroscopy, including
-robust data handling, flexible processing pipelines, spin simulations, and
-Deep learning based denoising. It is designed as a general NMR framework that
-can serve as a foundation for higher-level workflows, including applications
-where NMR data are used in quantitative studies. Many of these tools have 
-already been used in ongoing projects, and the goal of NMRflux.jl is to collect 
-them in a single, consistent interface that can be used both inside and outside the group.
-
-!!! note "Scope and applications"
-    NMRflux.jl is designed to be applicable to a wide range of NMR experiments.
-    It aims to support standard NMR data processing workflows, spin dynamics
-    simulations, synthetic data generation, and automated spectra cleaning. The
-    package is intended as a flexible foundation that can be integrated into
-    larger analysis pipelines, including applications where NMR data contribute
-    to quantitative or multivariate studies.Everyday tasks should be straightforward 
-    with sensible defaults, while power users can access lower-level routines for 
-    fine-grained control.
-
-
-## Manual Outline
-
-If you would like to get started quickly, begin with the **Getting Started**
-section in the Manual, which explains how to install the package, load data,
-and perform basic processing steps.
-
-For a more complete description of the available tools, refer to the **Manual**
-and the **Roadmap to 1.0**, which describe the design of the data structures,
-processing and simulation modules, and the planned evolution towards a stable
-1.0 release.
-
-A complete list of functions, types, and modules - together with their
-docstrings - can be found in the **API Reference**.
+- Start with **Getting Started** for installation, vendor data loading, and a basic 1D processing pipeline.
+- **User Manual** gives a short guided overview of the package, and the pages under **Advanced topics** cover data loading, `SpectData`, processing, and spin dynamics in more detail.
+- **Development** holds the roadmap to 1.0, which tracks what is finished and what is still moving.
+- **Reference** lists the documented public functions, types, and modules.
+- **Machine learning demonstrator** documents RINSE as a use case of the public NMRflux interfaces.
 
 ## Feedback
 
-`NMRflux.jl` is under active development, and feedback is very welcome.  
-Bug reports, feature requests, and suggestions can be submitted via the
-project's GitHub repository or contact `marcel.utz@kit.edu` by email.
+`NMRflux.jl` is under active development. Send bug reports, feature requests, and suggestions through the project GitHub repository, or contact `marcel.utz@kit.edu`.
 
 ## Citing NMRflux.jl
 
-If you use `NMRflux.jl` in published work, we would appreciate an acknowledge this by citing our work. 
-A formal reference for `NMRflux.jl` is planned and will be added here once available.
+If you use `NMRflux.jl` in published work, please cite the corresponding NMRflux publication once the formal reference is available.

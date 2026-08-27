@@ -2,16 +2,13 @@
 # -*- coding: utf-8 -*-
 
 ###########################################################################
-# File:                make.jl
-# Project:             NMRflux.jl - NMR Processing, Simulation, and ML Tools
-# Author:              Manaz Kaleel
-# Created:             2025-11-24
-# Last Modified:       2026-06-10
+# File:        make.jl
+# Project:     NMRflux.jl
 #
 # Description:
-#   This script builds the NMRflux.jl documentation using Documenter.jl.
-#   It collects all docstrings, renders the manual, generates the API
-#   reference, and produces a complete HTML documentation site.
+#   Build the NMRflux.jl documentation using Documenter.jl.
+#   Configures the documentation pages and HTML output and runs the
+#   documentation build.
 ###########################################################################
 
 using Pkg
@@ -39,21 +36,26 @@ makedocs(
     format = Documenter.HTML(
         prettyurls   = false,   # set to true later for GitHub Pages
         collapselevel = 2,
-        assets       = String[],        # Documenter default
+        #assets       = String[],        # Documenter default but uses only half a page
+        assets = ["custom.css"],
     ),
 
     pages = [
         "Home" => "index.md",
 
-        "Manual" => [
+        "Quick Start" => [
             "Getting Started" => "QuickStart.md",
+        ],
+
+        "Manual" => [
+            "User Manual" => "Manual.md",
         ],
 
         "Advanced topics" => [
             "Data Loading" => "DataLoading.md",
             "SpectData" => "SpectData.md",
             "Data Processing" => "DataProcessing.md",
-            "Spin Dynamics and FID generation" => "SpinDynamics.md",
+            "Spin Dynamics" => "SpinDynamics.md",
         ],
 
         "Development" => [
@@ -62,6 +64,10 @@ makedocs(
 
         "Reference" => [
             "API" => "Reference.md",
+        ],
+
+        "Machine learning demonstrator" => [
+            "RINSE" => "RINSE.md",
         ],
     ],
 
