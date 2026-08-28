@@ -29,6 +29,11 @@ applied first)
 Chain(fs::Vararg{Function}) = reduce(∘, reverse(fs))
 
 
+# TODO: Clean up API according to the following principles:
+# 1. Argument structure of NMRProcessors:
+#     - Dimension should be a keyword argument `dim` with default value 1
+# 2. Whenever possible, functionality should be provided as NMRProcessor1D (as opposed to the more general NMRProcessor).
+
 import FFTW
 
 struct FourierTransform <: NMRProcessor
@@ -118,6 +123,31 @@ function (ap::Apodize)(A::SpectData)
     end
 
     return(SpectData(apo,A.coord))
+end
+
+
+@doc raw"""
+    function CoordMap(f::Function, dim::Integer)
+
+returns a processor that replaces the `dim`-th coordinate of a `SpectData` by
+`f.(coord)`, i.e., applies `f` to each element of that coordinate vector. The
+underlying data is left unchanged. This is useful, e.g., to rescale or relabel
+an axis, such as converting a frequency axis from Hz to ppm.
+
+**Example:**
+```julia
+hz_to_ppm = CoordMap(f -> f/600.13, 1)   # convert a Hz axis to ppm at 600.13 MHz
+spectrum_ppm = hz_to_ppm(spectrum)
+```
+"""
+struct CoordMap <: NMRProcessor
+    f::Function
+    dim::Int64
+end
+
+function (cm::CoordMap)(A::SpectData{T,N}) where {T,N}
+    newcoord = ntuple(k -> k == cm.dim ? cm.f.(A.coord[k]) : A.coord[k], N)
+    return SpectData(A.dat, newcoord)
 end
 
 

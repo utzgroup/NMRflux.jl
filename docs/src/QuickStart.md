@@ -139,4 +139,3 @@ for _ in 1:200
     Flux.update!(opt, Flux.params(m), gs)         # Update model parameters using Adam
 end
 ```
-# End of Manual
