@@ -11,6 +11,9 @@
 #   documentation build.
 ###########################################################################
 
+ENV["GKSwstype"] = "100"   # force GR (Plots.jl backend) into headless mode, so
+                            # rendering plots for the docs doesn't pop up a GUI window
+
 using Pkg
 Pkg.activate(joinpath(@__DIR__, ".."))   # activate the package's main Project.toml,
                                          # which has all of NMRflux's deps + Documenter.
@@ -55,7 +58,9 @@ makedocs(
             "Data Loading" => "DataLoading.md",
             "SpectData" => "SpectData.md",
             "Data Processing" => "DataProcessing.md",
-            "Spin Dynamics" => "SpinDynamics.md",
+            "Spin Dynamics and FID generation" => "SpinDynamics.md",
+            # "RINSE" => "RINSE.md",
+            "Sinusoidal Decomposition (Craft)" => "Craft.md",
         ],
 
         "Development" => [

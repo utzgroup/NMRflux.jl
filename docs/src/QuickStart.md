@@ -22,7 +22,7 @@ NMRflux reads Bruker, JEOL, Magritek Spinsolve, Varian/Agilent, and Oxford Instr
 ```@example brukerEg
 using NMRflux
 using NMRflux.Examples
-using Plots: plot, savefig
+using Plots: plot, plot!, savefig
 
 data_jeol = NMRflux.Examples.Data["Spheroid culture medium"]
 jdf_file = joinpath(data_jeol["path"], "yp-5-fu-2.5-100.jdf")
@@ -40,31 +40,55 @@ savefig("quickstart_bruker_fid.svg"); nothing
 
 `NMRflux.load` returns two things: a dictionary of acquisition parameters straight from the vendor file, and a `SpectData` object holding the time domain signal together with its time axis. Which kind of path each vendor expects, and what each loader does to the raw data, is set out in [Loading NMR Data](DataLoading.md).
 
-## 3. Apply a 1D processing chain
+In `NMRflux.jl`, processing is implemented via `NMRProcessor` functors that can be composed using `Chain`.
+
+Here is a minimal example of a processing pipeline:
 
 ```@example brukerEg
-N_new = max(length(data_td.dat), 2^16)
 
-p = Chain(
-    ZeroFill([N_new]),
-    Apodize([0.5]),
-    FourierTransform([N_new], [1]; fftshift=true),
-    PhaseCorrect(-0.55pi,2pi*0.00175,1),
-    MedianBaselineCorrect(1; wdw=2<<12),
+Processing = Chain(
+    ZeroFill([2^16]),
+    FourierTransform([2^16],[1]),
+    AutoPhaseCorrectChen(1)
 )
 
-s = p(data_td)
-s ./= sqrt(sum(s.*conj(s)))
-plot(
-    coords(s,1) / 600 .+ 4.835,
-    real(s),
-    xaxis=:flip, xlabel = "1H chemical shift [ppm]", xlims=[-0.5,7.5],
-    label=nothing,
-    grid=false,
-    yaxis=false,
-    minorticks=10,
-    title = "quickstart_processing_pipeline"
+proc = Processing(data_td / 1e10 )
+
+plot(proc.coord[1]/700 .+ 4.78, real.(proc),xaxis=:flip,
+xlims=[-0.5,9.0]
 )
+
+savefig("quickstart_basic_spect.svg") ; nothing # hide
+```
+![](quickstart_basic_spect.svg)
+
+`Processing` consists of zero filling to 64k points, Fourier transformation,
+and automatic phase correction.
+
+In practice, other steps may be added, for example a digital filter to 
+remove the solvent artefact (appearing in the middle of the spectrum),
+apodization (to balance resolution and sensitivity), and baseline 
+correction (to remove distortions due to probe ringing):
+
+```@example brukerEg
+dt = step(data_td.coord[1])
+
+Processing = Chain(
+    ZeroFill([2^16]),
+    Apodize([0.5π]),
+    DigitalFilter(NMRflux.BandReject(-0.0025,0.005,1024),1),
+    FourierTransform([2^16],[1]),
+    PhaseCorrect(0.0,2pi*1024*dt,1),
+    AutoPhaseCorrectChen(1),
+    MedianBaselineCorrect(1,wdw=2048)
+)
+
+proc = Processing(data_td / 1e10 )
+
+integral = proc |> Integral(1)
+
+plot(proc.coord[1]/700 .+ 4.78, real.(proc),xaxis=:flip, xlims=[-0.5,9.0],label="Spectrum", xlabel="Chemical Shift (ppm)")
+plot!(proc.coord[1]/700 .+ 4.78, real(integral ) ./20 , xaxis=:flip,label="Integral")
 
 savefig("quickstart_processing_pipeline.svg"); nothing # hide
 ```

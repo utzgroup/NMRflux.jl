@@ -90,6 +90,12 @@ NMRflux.Examples
 NMRflux.Examples.Data
 ```
 
+## Craft API
+```@autodocs
+Modules = [NMRflux.Craft]
+Order   = [:module, :type, :function, :method]
+```
+
 ## Index
 
 ```@index

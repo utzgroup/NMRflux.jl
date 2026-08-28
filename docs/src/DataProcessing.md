@@ -51,6 +51,241 @@ savefig("loaded_FID.svg"); nothing # hide
 N_orig = length(data_td_JEOL.dat)
 N_new = max(N_orig, 2^16)
 
+N_new = max(N_orig, N_target)       # Never shrink: only zero fill if N_orig < N_target
+zf = ZeroFill([N_new])              # Create ZeroFill processor
+
+data_p = data_td_joel |> zf  # Apply zero filling to the SpectData object
+(size(data_td_joel), size(data_p)) # Before/after sizes
+```
+
+```@example joelEg
+t_zf = data_p.coord[1]
+y_zf = real.(data_p.dat)
+
+plot(t_zf, y_zf;
+xlabel = "time / s",
+ylabel = "signal (a.u.)",
+title = "JOEL FID after zero filling")
+
+savefig("joel_fid_zf_plot.svg"); nothing  # hide
+```
+![](joel_fid_zf_plot.svg)
+
+## 1.4 Apodization (`Apodize`)
+Apodization applies a decay function (window) to the time-domain FID. In practice, this damps the tail of the FID, reducing truncation artefacts and high frequency noise in the frequency domain at the cost of some line broadening. It is typically applied *after* zero filling and before the Fourier transform. 
+
+In `NMRflux.jl`, apodization is implemented by the processor Apodize, which
+acts on `SpectData` by multiplies the data along selected dimensions by an exponential factor of the form:
+```@julia
+f(t) = exp.(-R * t)
+```
+where:
+- The `t` is the coordinate axis of the processed dimension (usually time)
+- The `R` is the user specified decay constant for that dimension
+
+Internally, Apodize uses the coordinate vector of each selected dimension to compute this exponential weighting and multiplies it into the underlying data array. The coordinate vectors are preserved. For time domain FIDs, `R` therefore has units of `1/seconds`. Continuing from the previous section, we apply apodization to the zero filled FID `data_td_joel_zf`:
+```@example joelEg
+ap = Apodize([0.5]) # Decay constant for the first (time) dimension
+
+data_p = data_td_joel |> zf |> ap ;
+
+```
+This produces a windowed time domain signal suitable for Fourier transformation.
+
+```@example joelEg
+# Extract time axis and real part AFTER apodization
+t_ap = data_p.coord[1]
+y_ap = real.(data_p)
+
+plot(t_ap, y_ap; xlabel="time / s", ylabel="signal (a.u.)", title="JOEL FID after ZF + AP")
+savefig("joel_fid_zf_ap_plot.svg"); nothing  # hide
+```
+![](joel_fid_zf_ap_plot.svg)
+
+## 1.5 Fourier transform (FourierTransform)
+The Fourier transform converts a time domain FID into a frequency domain spectrum. After zero filling and apodization, applying the FFT produces a complex spectrum whose real and imaginary parts can be used for further processing (phase correction, baseline correction, peak picking, etc.).
+
+In `NMRflux.jl`, the processor FourierTransform wraps FFTW's FFT planning and
+updates the coordinate axes accordingly. For each transformed dimension:
+- The FFT is applied to the data
+- The coordinate axis is replaced by a frequency axis based on the sampling interval (Nyquist theorem)
+- By default, the spectrum is shifted so that zero frequency appears at the centre (fftshift = true). This behaviour can be disabled by setting fftshift = false.
+
+The `FourierTransform` constructor is declared as:
+
+```@julia
+function FourierTransform(SI::Vector, dims::Vector; fftshift = true)
+     dummy = zeros(ComplexF64, SI...)
+     plan = FFTW.plan_fft(dummy, dims)
+     return FourierTransform(dims, SI, fftshift, plan)
+end
+```
+- `SI`: size of the data array (e.g. [N] for 1D, [N1, N2] for 2D)
+- `dims`: dimensions along which the FFT is computed (e.g. [1], [1, 2])
+- `fftshift`: whether to apply FFTW.fftshift so that zero frequency is in the centre of the axis
+
+Example: Continuing from Section *4.4*, we start from the apodized, zero filled FID `data_td_joel_zf_ap`:
+```@example joelEg
+SI = 2^16           # Size of the apodized time domain data (1D)
+ft = FourierTransform([SI], [1]; fftshift = true) # Construct a FourierTransform along the first dimension, with fftshift
+
+data_p = data_td_joel  |> zf |> ap |> ft  ;   # Apply FT to the apodized zero filled SpectData
+```
+
+```@example joelEg
+f_ap = data_p.coord[1]   # frequency axis (Hz)
+y_ap = real.(data_p) # real spectrum
+
+plot(f_ap, y_ap, xaxis=:flip,
+xlabel = "frequency [Hz]",
+ylabel = "signal (a.u.)",
+title = "JOEL spectrum (ZF + AP + FT)")
+
+savefig("joel_fd_zf_ap_plot.svg"); nothing # hide
+```
+![](joel_fd_zf_ap_plot.svg)
+
+## 1.6 Phase correction (PhaseCorrect)
+After Fourier transformation, NMR spectra usually require phase correction before the real part of the spectrum can be interpreted as an absorption mode spectrum. Phase errors can lead to dispersive lineshapes, asymmetric peaks, and negative peak components. `PhaseCorrect` applies zero-order and first-order phase correction along a chosen dimension.
+
+- `ph0`: zero order phase (radians), a uniform rotation applied to all points
+- `ph1`: first order phase (radians per axis unit), a linear phase ramp
+- `dim`: the dimension along which the correction is applied (typically `1` for 1D spectra)
+
+Continuing from the previous section, we start from the frequency domain, zero filled, apodized spectrum `data_fd_joel_zf_ap`:
+```@example joelEg
+ph0 = -0.55pi       # zero-order phase (radians)
+ph1 = 2pi*0.00175   # first-order phase (radians)
+dim = 1             # apply along the first (frequency) dimension
+
+pc = PhaseCorrect(ph0, ph1, dim)
+data_p =data_td_joel  |> zf |> ap |> ft |> pc 
+
+f_pc = data_p.coord[1]
+y_pc = real.(data_p)
+
+plot(f_pc, y_pc, xaxis=:flip,
+     xlabel = "frequency [Hz]",
+     ylabel = "signal (a.u.)",
+     title  = "JOEL spectrum (ZF + AP + FT + PC)")
+
+savefig("joel_fd_zf_ap_pc_plot.svg"); nothing # hide
+```
+![](joel_fd_zf_ap_pc_plot.svg)
+
+
+In practice, `ph0` and `ph1` are adjusted until the peaks in the real part of the spectrum are predominantly absorptive and symmetric. This can be done manually, interactively, or by using an automatic phase correction method. Via the generic `NMRProcessor1D` machinery, `PhaseCorrect` can also be applied slice wise along a chosen dimension of higher dimensional SpectData objects.
+
+## 1.7 Automatic phase correction (`AutoPhaseCorrectChen`)
+AutoPhaseCorrectChen provides an automatic phase correction processor based on the minimum entropy method of Chen et al. [J. Magn. Reson. 158 (2002), 164–168]. The method estimates phase correction parameters by minimizing an entropy based objective function.
+
+The processor first optimizes the zero-order phase and then refines both zero-order and first-order phase terms. The optional penalty parameter `γ` adds a penalty for negative real valued points in the corrected spectrum. This can help reduce overcorrection, especially in noisy spectra.
+
+- `dim`: dimension along which phase correction is applied, typically `1` for 1D spectra
+- `verbose`: if `true`, prints optimisation information
+- `γ`: penalty strength for negative real-valued points; default is `1.0e-5`
+
+Automatic phase correction is most reliable when the spectrum is already reasonably close to the correct phase. For spectra with substantial first-order phase error, an approximate manual correction can be applied first, followed by `AutoPhaseCorrectChen` as a refinement step.
+
+Example: automatic refinement after approximate manual phase correction.
+
+We start again from the zero filled, apodized, Fourier transformed spectrum `data_fd_joel_zf_ap`. First, an approximate manual correction is applied. The automatic method is then used to refine the result:
+
+```@example joelEg
+ph0_guess = -0.55pi
+ph1_guess = 2pi*0.00175
+
+pc_guess = PhaseCorrect(ph0_guess, ph1_guess, 1)
+
+apc = NMRflux.AutoPhaseCorrectChen(1, verbose=false, γ=0.0e-5)
+data_p = data_td_joel |> zf |> ap |> ft |> pc_guess |> apc ;
+
+f_apc = data_p.coord[1]
+y_apc = real.(data_p)
+
+plot(f_apc, y_apc, xaxis=:flip,
+     xlabel = "frequency [Hz]",
+     ylabel = "signal (a.u.)",
+     title  = "JOEL spectrum (ZF + AP + FT + PC + automatic PC refinement)")
+
+savefig("joel_fd_zf_ap_apc_plot.svg"); nothing # hide
+```
+![](joel_fd_zf_ap_apc_plot.svg)
+
+The automatically corrected spectrum should still be inspected visually. This is especially important for noisy spectra, spectra with strong baseline distortions, spectra with large residual solvent signals, or spectra with unusual peak shapes. In such cases, changing the penalty parameter `γ` may help reduce excessive negative peaks or overcorrection.
+
+For example, a stronger penalty can be used as follows:
+
+```@example joelEg
+apc_stronger_penalty = NMRflux.AutoPhaseCorrectChen(1, verbose=false, γ=1.0e-4)
+data_fd_joel_zf_ap_apc_penalty = apc_stronger_penalty(data_p)
+
+eltype(data_fd_joel_zf_ap_apc_penalty.dat), ndims(data_fd_joel_zf_ap_apc_penalty.dat)
+```
+
+## 1.7 Baseline correction (MedianBaselineCorrect)
+After phase correction, spectra often exhibit slowly varying offsets or slopes in the real part, known as baseline distortions. These can bias peak integration and make peak picking less reliable. Baseline correction should be applied after phase correction, so that the real part contains the absorptive peaks. The `MedianBaselineCorrect` implements a robust baseline correction for the real part of a spectrum. The algorithm follows the method of M. S. Friedrichs (Journal of Biomolecular NMR, 5 (1995) 147-153) and proceeds as follows along a chosen dimension:
+- For each position along the axis, a local window of width `2 * wdw + 1` points is considered
+- Within this window, local extrema (minima and maxima) of the real part are extracted
+- The median of these extrema is taken as a robust estimate of the local baseline
+- The sequence of baseline estimates is then smoothed by convolution with a Gaussian like kernel
+- The resulting smooth baseline is subtracted from the original complex data (affecting primarily the real part)
+
+The processor is constructed as:
+```@julia
+NMRflux.MedianBaselineCorrect(dim; wdw=2<<12)
+```
+where:
+- `dim`: dimension along which baseline correction is performed (typically 1 for 1D spectra)
+- `wdw`: half width of the local window in points (controls the "smoothness" scale of the baseline)
+
+Example: Continuing from the previous section, we start from the phased frequency domain spectrum `data_fd_joel_zf_ap_pc`:
+```@example joelEg
+mbc = NMRflux.MedianBaselineCorrect(1; wdw=2<<12) # baseline correction along frequency dimension
+data_p = data_td_joel |> zf |> ap |> ft |> pc |> apc |> mbc;
+
+```
+
+```@example joelEg
+f_bc = data_p.coord[1]          # frequency axis (Hz)
+y_bc = real.(data_p)        # real part after baseline correction
+
+plot(f_bc, y_bc,  xaxis=:flip,
+     xlabel = "frequency [Hz]",
+     ylabel = "signal (a.u.)",
+     title  = "JOEL spectrum (ZF + AP + FT + PC + BC)")
+
+savefig("joel_fd_zf_ap_pc_bc_plot.svg"); nothing # hide
+```
+![](joel_fd_zf_ap_pc_bc_plot.svg)
+
+Here:
+- `dim = 1` selects the first dimension (the frequency axis) for baseline correction
+- `wdw = 256` sets the half width of the local window; larger values produce a smoother, more slowly varying baseline estimate
+
+The output `data_fd_jeol_zf_ap_pc_bc` is a `SpectData` object with the same coordinates as the input but with the baseline of the real part largely removed, providing a cleaner spectrum for peak picking and integration.
+
+## 1.8 A typical 1D processing pipeline
+In practice, the processing steps described above are often combined into a single pipeline that transforms a raw time domain FID into a clean, baseline corrected spectrum ready for peak picking and integration.
+
+For 1D data, a typical sequence is:
+1. Zero filling
+2. Apodization
+3. Fourier transform
+4. Phase correction
+4. Baseline correction
+
+The `NMRflux.jl` allows these processors to be combined using `Chain`, which applies them in sequence.
+
+```@example joelEg
+# (1) Loading JOEL data
+data_joel = NMRflux.Examples.Data["Spheroid culture medium"]["files"][1]
+params_joel, data_td_joel = NMRflux.load(data_joel,:JEOL) ;
+
+# (1) Zero filling
+N_orig   = length(data_td_joel.dat)              # Original number of points
+N_target = 2^16                                  # Target size: 64k points
+N_new    = max(N_orig, N_target)                 # Never shrink: only zero fill if N_orig < N_target
 zf = ZeroFill([N_new])
 data_td_JEOL_zf = zf(data_td_JEOL)
 
