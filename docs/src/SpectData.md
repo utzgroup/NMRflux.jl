@@ -86,7 +86,7 @@ SpectData(collect(1.0:4.0))
 
 ## 5. Higher dimensions
 
-For an N dimensional dataset, `dat` becomes an N dimensional array and `coord[k]` holds the physical coordinate for dimension `k`. `FourierTransform` replaces the transformed axis with a frequency axis, `ZeroFill` extends it, and every other processor passes the coordinates through untouched.
+For an N dimensional dataset, `dat` becomes an N dimensional array and `coord[k]` holds the physical coordinate for dimension `k`. `FourierTransformPlan` replaces the transformed axis with a frequency axis, `ZeroFill` extends it, and every other processor passes the coordinates through untouched.
 
 ```@example JEOLEg
 S2 = SpectData(reshape(collect(1.0:12.0), 4, 3),

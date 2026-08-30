@@ -102,22 +102,22 @@ savefig("joel_fid_zf_ap_plot.svg"); nothing  # hide
 ```
 ![](joel_fid_zf_ap_plot.svg)
 
-## 1.5 Fourier transform (FourierTransform)
+## 1.5 Fourier transform (FourierTransformPlan)
 The Fourier transform converts a time domain FID into a frequency domain spectrum. After zero filling and apodization, applying the FFT produces a complex spectrum whose real and imaginary parts can be used for further processing (phase correction, baseline correction, peak picking, etc.).
 
-In `NMRflux.jl`, the processor FourierTransform wraps FFTW's FFT planning and
+In `NMRflux.jl`, the processor FourierTransformPlan wraps FFTW's FFT planning and
 updates the coordinate axes accordingly. For each transformed dimension:
 - The FFT is applied to the data
 - The coordinate axis is replaced by a frequency axis based on the sampling interval (Nyquist theorem)
 - By default, the spectrum is shifted so that zero frequency appears at the centre (fftshift = true). This behaviour can be disabled by setting fftshift = false.
 
-The `FourierTransform` constructor is declared as:
+The `FourierTransformPlan` constructor is declared as:
 
 ```@julia
-function FourierTransform(SI::Vector, dims::Vector; fftshift = true)
+function FourierTransformPlan(SI::Vector, dims::Vector; fftshift = true)
      dummy = zeros(ComplexF64, SI...)
      plan = FFTW.plan_fft(dummy, dims)
-     return FourierTransform(dims, SI, fftshift, plan)
+     return FourierTransformPlan(dims, SI, fftshift, plan)
 end
 ```
 - `SI`: size of the data array (e.g. [N] for 1D, [N1, N2] for 2D)
@@ -127,7 +127,7 @@ end
 Example: Continuing from Section *4.4*, we start from the apodized, zero filled FID `data_td_joel_zf_ap`:
 ```@example joelEg
 SI = 2^16           # Size of the apodized time domain data (1D)
-ft = FourierTransform([SI], [1]; fftshift = true) # Construct a FourierTransform along the first dimension, with fftshift
+ft = FourierTransformPlan([SI], [1]; fftshift = true) # Construct a FourierTransformPlan along the first dimension, with fftshift
 
 data_p = data_td_joel  |> zf |> ap |> ft  ;   # Apply FT to the apodized zero filled SpectData
 ```
@@ -323,13 +323,13 @@ savefig("JEOL_td_zf_ap_plot.svg"); nothing # hide
 
 ## 5. Fourier transform
 
-`FourierTransform(SI, dims; fftshift=true)` transforms along the listed dimensions and replaces each transformed coordinate with a frequency coordinate. The sizes in `SI` are used to build an FFTW plan once, which makes repeated transforms of same sized datasets cheap. Build a new processor when the size changes.
+`FourierTransformPlan(SI, dims; fftshift=true)` transforms along the listed dimensions and replaces each transformed coordinate with a frequency coordinate. The sizes in `SI` are used to build an FFTW plan once, which makes repeated transforms of same sized datasets cheap. Build a new processor when the size changes.
 
 The new coordinate runs from `-SW/2` to `+SW/2`, where `SW` is the reciprocal of the original sample spacing. Zero frequency therefore sits in the centre of the axis, which is what `fftshift=true` arranges in the data. Keep the default: the coordinate is centred either way, so turning the shift off leaves the axis labelling out of step with the data.
 
 ```@example JEOLEg
 SI = [length(data_td_JEOL_zf_ap.dat)]
-ft = FourierTransform(SI, [1]; fftshift=true)
+ft = FourierTransformPlan(SI, [1]; fftshift=true)
 
 data_fd_JEOL_zf_ap = ft(data_td_JEOL_zf_ap)
 size(data_fd_JEOL_zf_ap.dat)
@@ -349,7 +349,7 @@ savefig("JEOL_fd_zf_ap_plot.svg"); nothing # hide
 
 ### 5.1. PPM conversion
 
-The frequency axis that `FourierTransform` produces is centred on the transmitter. Dividing it by the observe frequency in MHz converts it to ppm, and adding the shift of the reference line puts it on the conventional scale. This dataset was acquired at 600 MHz with the transmitter on the water resonance at 4.835 ppm, which is where the two constants below come from.
+The frequency axis that `FourierTransformPlan` produces is centred on the transmitter. Dividing it by the observe frequency in MHz converts it to ppm, and adding the shift of the reference line puts it on the conventional scale. This dataset was acquired at 600 MHz with the transmitter on the water resonance at 4.835 ppm, which is where the two constants below come from.
 
 ```@example JEOLEg
 s = data_fd_JEOL_zf_ap
@@ -456,7 +456,7 @@ data_td_JEOL_zf_ap = ap(data_td_JEOL_zf)
 
 # FFT
 SI = [length(data_td_JEOL_zf_ap.dat)]
-ft = FourierTransform(SI, [1]; fftshift=true)
+ft = FourierTransformPlan(SI, [1]; fftshift=true)
 data_fd_JEOL_zf_ap = ft(data_td_JEOL_zf_ap)
 
 # Auto phase correction
@@ -534,7 +534,7 @@ N_new = max(length(data_td_JEOL.dat), 2^16)
 p = Chain(
     ZeroFill([N_new]),
     Apodize([0.5]),
-    FourierTransform([N_new], [1]; fftshift=true),
+    FourierTransformPlan([N_new], [1]; fftshift=true),
     PhaseCorrect(-0.55pi, 2pi * 0.00175, 1),
     MedianBaselineCorrect(dim=1, wdw=2048),
 )

@@ -37,7 +37,7 @@ Chain(fs::Vararg{Function}) = reduce(∘, reverse(fs))
 
 import FFTW
 
-struct FourierTransform <: NMRProcessor
+struct FourierTransformPlan <: NMRProcessor
     dims::Vector{Integer}
     SI::Vector{Integer}
     fftshift::Bool
@@ -45,27 +45,30 @@ struct FourierTransform <: NMRProcessor
 end
 
 @doc raw"""
-    function FourierTransform(SI::Vector,dims::Vector; fftshift=true)
+    function FourierTransformPlan(SI::Vector,dims::Vector; fftshift=true)
 
 Fourier transform processor for data sets of size `SI`. `dims` is a Vector
 of the dimensions along which a Fourier transform will be computed.
 The corresponding coordinates are automatically replaced by frequencies,
 based on the Nyqvist theorem. The zero frequency appears in the centre of the
-spectrum. 
+spectrum.
 
-The function produces a FFTW plan for the Fourier transform, which is stored ^in
-the returned `FourierTransform` object. This makes it more efficient to apply
-the Fourier transform to multiple data sets of the same size. If the size of the
-data set changes, a new `FourierTransform` object should be created.
+The function produces an FFTW plan for the Fourier transform, matched exactly
+to the size `SI`, which is stored in the returned `FourierTransformPlan`
+object. This makes it more efficient to apply the Fourier transform to
+multiple data sets of the same size — but as a consequence, a
+`FourierTransformPlan` can only be applied to `SpectData` objects of exactly
+that size. If the size of the data set changes, a new `FourierTransformPlan`
+must be created for it.
 
 """
-function FourierTransform(SI::Vector,dims::Vector; fftshift=true)
+function FourierTransformPlan(SI::Vector,dims::Vector; fftshift=true)
     dummy=zeros(ComplexF64,SI...)
     plan=FFTW.plan_fft(dummy,dims)
-    return( FourierTransform(dims,SI,fftshift,plan))
+    return( FourierTransformPlan(dims,SI,fftshift,plan))
 end
 
-function (ft::FourierTransform)(S::SpectData)
+function (ft::FourierTransformPlan)(S::SpectData)
     ftdat = ft.plan*S.dat
     newcoord=[]
     for (k,d) in enumerate(S.coord)
@@ -171,7 +174,78 @@ function (np1d::NMRProcessor1D)(A::SpectData{T,N}) where {T,N}
 end
 
 @doc raw"""
-    function FFT(; dim::Integer=1)
+    struct ZeroFill1D <: NMRProcessor1D
+
+the `NMRProcessor1D` built by `ZeroFill`; see its docstring for how to
+construct one.
+"""
+struct ZeroFill1D <: NMRProcessor1D
+    SI::Int64
+    dim::Int64
+end
+
+@doc raw"""
+    function ZeroFill(; SI::Integer, dim::Integer=1)
+
+returns a processor that extends a spectrum along the dimension `dim`
+(default `1`) to length `SI` by appending zeros. This raises the digital
+resolution of a subsequent Fourier transform without adding any
+experimental information. `SI` must be at least the current length along
+`dim`.
+
+The coordinate along `dim` must be an `AbstractRange`, so that it can be
+extended with the same step size to the new length.
+"""
+function ZeroFill(; SI::Integer, dim::Integer=1)
+    return ZeroFill1D(SI, dim)
+end
+
+function (zf::ZeroFill1D)(A::SpectData{T,1}) where {T}
+    oldsize = length(A.dat)
+    A.coord[1] isa AbstractRange || error("ZeroFill1D requires the coordinate to be an AbstractRange")
+    newcoord = range(first(A.coord[1]), step=step(A.coord[1]), length=zf.SI)
+    newdat = zeros(T, zf.SI)
+    newdat[1:oldsize] = A.dat
+    return SpectData(newdat, (newcoord,))
+end
+
+@doc raw"""
+    struct Apodize1D <: NMRProcessor1D
+
+the `NMRProcessor1D` built by `Apodize`; see its docstring for how to
+construct one.
+"""
+struct Apodize1D <: NMRProcessor1D
+    R::Float64
+    dim::Int64
+end
+
+@doc raw"""
+    function Apodize(; R::Real, dim::Integer=1)
+
+returns a processor that multiplies a spectrum along the dimension `dim`
+(default `1`) by the exponential weighting function `exp(-R*t)`, where `t`
+is the coordinate of that dimension. If the coordinate is in seconds, `R`
+is in inverse seconds.
+
+!!! warning "In place modification"
+    `Apodize` writes the weighted signal back into the array it was handed,
+    and the object it returns shares that same array. The input is
+    therefore modified in place. Keep a copy of the raw FID if you need it
+    later, and do not apply the same processor twice to the same data.
+"""
+function Apodize(; R::Real, dim::Integer=1)
+    return Apodize1D(Float64(R), dim)
+end
+
+function (ap::Apodize1D)(A::SpectData{T,1}) where {T}
+    apo = A.dat
+    apo .*= exp.(-ap.R .* A.coord[1])
+    return SpectData(apo, A.coord)
+end
+
+@doc raw"""
+    function FourierTransform(; dim::Integer=1)
 
 returns a processor that computes the Fourier transform of a spectrum along
 the dimension `dim` (default `1`), via `FFTW.fft` followed by `FFTW.fftshift`
@@ -180,20 +254,23 @@ replaced by a frequency axis, based on the Nyqvist theorem: for a coordinate
 with `n` points and step `dt`, the new coordinate runs from `-1/(2dt)` to
 `1/(2dt)`.
 
-Unlike `FourierTransform`, `FFT` requires no pre-built plan and no target
-size — as an `NMRProcessor1D`, it applies to a `SpectData` of any
-dimensionality via `mapslices`, transforming only `dim` and leaving all other
-dimensions (data and coordinates) untouched.
+This is the recommended way to Fourier transform a spectrum. Unlike
+`FourierTransformPlan`, it requires no pre-built plan and no target size —
+as an `NMRProcessor1D`, it applies to a `SpectData` of any dimensionality
+via `mapslices`, transforming only `dim` and leaving all other dimensions
+(data and coordinates) untouched. Reach for `FourierTransformPlan` instead
+only when transforming many data sets of the same, fixed size, where
+reusing a precomputed FFTW plan is worth the loss of flexibility.
 """
-struct FFT <: NMRProcessor1D
+struct FourierTransform <: NMRProcessor1D
     dim::Int64
 end
 
-function FFT(; dim::Integer=1)
-    return FFT(dim)
+function FourierTransform(; dim::Integer=1)
+    return FourierTransform(dim)
 end
 
-function (fft::FFT)(A::SpectData{T,1}) where {T<:Number}
+function (ft::FourierTransform)(A::SpectData{T,1}) where {T<:Number}
     Δf = 1.0/step(A.coord[1])
     newcoord = range(-Δf/2,Δf/2,length=length(A.coord[1]))
     return SpectData(FFTW.fftshift(FFTW.fft(A.dat)),(newcoord,))

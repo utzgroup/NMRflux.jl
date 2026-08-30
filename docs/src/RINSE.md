@@ -23,7 +23,7 @@ RINSE targets systematic artefacts in one dimensional NMR spectra: phase distort
 process = Chain(
     ZeroFill([2^16]),
     Apodize([0.5pi]),
-    FourierTransform([2^16], [1]; fftshift=true)
+    FourierTransformPlan([2^16], [1]; fftshift=true)
 )
 
 spectrum = fid |> process

@@ -14,6 +14,7 @@ NMRflux.NMRProcessor
 NMRflux.NMRProcessor1D
 NMRflux.Chain
 NMRflux.FourierTransform
+NMRflux.FourierTransformPlan
 NMRflux.MedianBaselineCorrect
 NMRflux.AutoPhaseCorrectChen
 NMRflux.Derivative

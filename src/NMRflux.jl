@@ -1,7 +1,7 @@
 module NMRflux
 
     export SpectData,coords,load
-    export NMRProcessor, Chain, FourierTransform, Apodize, ZeroFill, FFT,
+    export NMRProcessor, Chain, FourierTransformPlan, Apodize, Apodize1D, ZeroFill, ZeroFill1D, FourierTransform,
            PhaseCorrect, MedianBaselineCorrect, Derivative, Integral,
            AutoPhaseCorrectChen, PeakAlign, DigitalFilter, CoordMap
    

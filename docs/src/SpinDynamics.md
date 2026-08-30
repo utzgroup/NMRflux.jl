@@ -109,7 +109,7 @@ N_NEW = 16384
 spectrum = Chain(
     ZeroFill([N_NEW]),
     Apodize([5.0]),
-    FourierTransform([N_NEW], [1]; fftshift=true),
+    FourierTransformPlan([N_NEW], [1]; fftshift=true),
 )(fid)
 
 plot(coords(spectrum, 1), real.(spectrum.dat);

@@ -48,7 +48,7 @@ Here is a minimal example of a processing pipeline:
 
 Processing = Chain(
     ZeroFill([2^16]),
-    FourierTransform([2^16],[1]),
+    FourierTransformPlan([2^16],[1]),
     AutoPhaseCorrectChen(dim=1)
 )
 
@@ -77,7 +77,7 @@ Processing = Chain(
     ZeroFill([2^16]),
     Apodize([0.5π]),
     DigitalFilter(NMRflux.BandReject(-0.0025,0.005,1024); dim=1),
-    FourierTransform([2^16],[1]),
+    FourierTransformPlan([2^16],[1]),
     PhaseCorrect(0.0,2pi*1024*dt,1),
     AutoPhaseCorrectChen(dim=1),
     MedianBaselineCorrect(dim=1,wdw=2048)

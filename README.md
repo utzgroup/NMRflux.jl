@@ -57,7 +57,7 @@ Functors carry their parameters and any pre-computed state (e.g. FFTW plans) as 
 fields. Individual processors are assembled into pipelines with `Chain`:
 
 ```julia
-pipeline = Chain(ZeroFill([N]), Apodize([0.5]), FourierTransform([N], [1]), PhaseCorrect(ph0, ph1, 1))
+pipeline = Chain(ZeroFill([N]), Apodize([0.5]), FourierTransformPlan([N], [1]), PhaseCorrect(ph0, ph1, 1))
 spectrum = pipeline(fid)
 ```
 
@@ -134,7 +134,7 @@ N = max(length(fid.dat), 2^16)
 pipeline = Chain(
     ZeroFill([N]),
     Apodize([0.5]),
-    FourierTransform([N], [1]; fftshift = true),
+    FourierTransformPlan([N], [1]; fftshift = true),
     PhaseCorrect(0.0, 0.0, 1),
     NMRflux.MedianBaselineCorrect(dim=1, wdw = 256)
 )
@@ -179,7 +179,7 @@ ML denoising pipeline, is available in `docs/src/`.
 **Classical processing pipeline**
 - `ZeroFill` — pads the FID to a target length and extends the time axis consistently.
 - `Apodize` — applies exponential line broadening along selected dimensions.
-- `FourierTransform` — FFTW-backed FFT with optional fftshift; updates frequency axes
+- `FourierTransformPlan` — FFTW-backed FFT with optional fftshift; updates frequency axes
   automatically.
 - `PhaseCorrect` — zero- and first-order phase correction.
 - `AutoPhaseCorrectChen` — automatic phase correction by entropy minimisation

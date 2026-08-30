@@ -13,7 +13,7 @@ jeol_file()   = NMRflux.Examples.Data["DMEM culture medium"]["files"][1]
 function bruker_spectrum(n=2^16)
     params, d = NMRflux.load(bruker_file(), :Bruker)
     zf  = ZeroFill([n])
-    ft  = FourierTransform([n], [1])
+    ft  = FourierTransformPlan([n], [1])
     d |> zf |> ft, params, d
 end
 
@@ -179,13 +179,47 @@ end
 end
 
 # ---------------------------------------------------------------------------
-# 6. FourierTransform
+# 5b. ZeroFill1D (NMRProcessor1D)
 # ---------------------------------------------------------------------------
-@testset "FourierTransform" begin
+@testset "ZeroFill1D" begin
+    n_orig = 10
+    n_new  = 20
+    t = range(0.0, step=0.1, length=n_orig)
+    v = NMRflux.SpectData(collect(1.0:n_orig), (t,))
+
+    zf1d = ZeroFill(SI=n_new, dim=1)
+    @test zf1d isa NMRflux.NMRProcessor1D
+
+    zd = zf1d(v)
+    @test length(zd) == n_new
+    @test coords(zd,1) isa AbstractRange
+    @test step(coords(zd,1)) == step(t)
+    @test all(zd.dat[1:n_orig] .== v.dat)
+    @test all(zd.dat[n_orig+1:end] .== 0)
+
+    # generalizes correctly to N-dimensional SpectData via mapslices:
+    # the transformed dimension's coordinate updates, others are untouched
+    A = NMRflux.SpectData(reshape(ComplexF64.(1:n_orig*3), n_orig, 3), (t, [1.0,2.0,3.0]))
+    B = zf1d(A)
+    @test size(B) == (n_new, 3)
+    @test coords(B,2) == coords(A,2)
+    for j in 1:3
+        @test B.dat[:,j] == zf1d(A[:,j]).dat
+    end
+
+    # non-range coordinate cannot be extended
+    v_bad = NMRflux.SpectData(collect(1.0:5.0), ([10.0,20.0,30.0,40.0,50.0],))
+    @test_throws ErrorException ZeroFill(SI=10)(v_bad)
+end
+
+# ---------------------------------------------------------------------------
+# 6. FourierTransformPlan
+# ---------------------------------------------------------------------------
+@testset "FourierTransformPlan" begin
     params, d = NMRflux.load(bruker_file(), :Bruker)
     n = 2^16
     zf = ZeroFill([n])
-    ft = FourierTransform([n], [1])
+    ft = FourierTransformPlan([n], [1])
     sp = ft(zf(d))
 
     @test length(sp) == n
@@ -199,7 +233,7 @@ end
 
     # fftshift=false: coord is still the symmetric range (same as shifted),
     # but the data array itself differs because no circular shift was applied
-    ft_no_shift = FourierTransform([n], [1]; fftshift=false)
+    ft_no_shift = FourierTransformPlan([n], [1]; fftshift=false)
     sp2 = ft_no_shift(zf(d))
     @test length(sp2) == n
     @test coords(sp2,1) == coords(sp,1)          # coord axis unchanged
@@ -207,16 +241,16 @@ end
 end
 
 # ---------------------------------------------------------------------------
-# 6b. FFT (NMRProcessor1D)
+# 6b. FourierTransform (NMRProcessor1D)
 # ---------------------------------------------------------------------------
-@testset "FFT" begin
+@testset "FourierTransform" begin
     n  = 64
     dt = 0.01
     t  = range(0.0, step=dt, length=n)
     v  = NMRflux.SpectData(ComplexF64.(sin.(2pi*5 .* t)), (t,))
 
-    fft1d = FFT(dim=1)
-    sp = fft1d(v)
+    ft1d = FourierTransform(dim=1)
+    sp = ft1d(v)
 
     @test length(sp) == n
     @test eltype(sp.dat) == ComplexF64
@@ -228,12 +262,12 @@ end
     # generalizes correctly to N-dimensional SpectData via mapslices:
     # the transformed dimension's coordinate updates, others are untouched
     A = NMRflux.SpectData(reshape(ComplexF64.(1:n*3), n, 3), (t, [1.0,2.0,3.0]))
-    B = fft1d(A)
+    B = ft1d(A)
     @test size(B) == size(A)
     @test coords(B,2) == coords(A,2)
     @test collect(coords(B,1)) ≈ collect(range(-Δf/2, Δf/2, length=n))
     for j in 1:3
-        @test B.dat[:,j] == fft1d(A[:,j]).dat
+        @test B.dat[:,j] == ft1d(A[:,j]).dat
     end
 end
 
@@ -255,6 +289,34 @@ end
     ratio_first = abs(d_big.dat[1]) / max(abs(d.dat[1]), 1e-30)
     ratio_last  = abs(d_big.dat[end]) / max(abs(d.dat[end]), 1e-30)
     @test ratio_last < ratio_first   # tail suppressed more than head
+end
+
+# ---------------------------------------------------------------------------
+# 7b. Apodize1D (NMRProcessor1D)
+# ---------------------------------------------------------------------------
+@testset "Apodize1D" begin
+    t = range(0.0, step=0.1, length=10)
+    v = NMRflux.SpectData(ComplexF64.(ones(10)), (t,))
+
+    ap1d = Apodize(R=0.5, dim=1)
+    @test ap1d isa NMRflux.NMRProcessor1D
+
+    d0 = Apodize(R=0.0)(v)
+    @test all(d0.dat .≈ v.dat)   # R=0 is identity
+
+    v2 = NMRflux.SpectData(ComplexF64.(ones(10)), (t,))
+    d = ap1d(v2)
+    @test d.dat ≈ exp.(-0.5 .* t)
+    @test coords(d,1) === coords(v2,1)
+
+    # generalizes correctly to N-dimensional SpectData via mapslices:
+    # the transformed dimension's coordinate updates, others are untouched
+    A = NMRflux.SpectData(ComplexF64.(ones(10,3)), (t, [1.0,2.0,3.0]))
+    B = ap1d(A)
+    @test coords(B,2) == coords(A,2)
+    for j in 1:3
+        @test B.dat[:,j] ≈ exp.(-0.5 .* t)
+    end
 end
 
 # ---------------------------------------------------------------------------
@@ -331,7 +393,7 @@ end
     params, d = NMRflux.load(bruker_file(), :Bruker)
     n = 2^16
     zf  = ZeroFill([n])
-    ft  = FourierTransform([n],[1])
+    ft  = FourierTransformPlan([n],[1])
     pc  = PhaseCorrect(ph0=0.80pi, ph1=2pi*0.00172)
     bc  = MedianBaselineCorrect(dim=1, wdw=1024)
 
@@ -349,7 +411,7 @@ end
     params, d = NMRflux.load(bruker_file(), :Bruker)
     n   = 2^15   # must be >= raw FID length (~32693)
     zf  = ZeroFill([n])
-    ft  = FourierTransform([n],[1])
+    ft  = FourierTransformPlan([n],[1])
     apc = AutoPhaseCorrectChen(dim=1, verbose=false)
 
     sp  = d |> zf |> ft |> apc
@@ -390,7 +452,7 @@ end
     n = 2^15
 
     zf = ZeroFill([n])
-    ft = FourierTransform([n],[1])
+    ft = FourierTransformPlan([n],[1])
 
     # |> piping
     sp_pipe  = d |> zf |> ft
