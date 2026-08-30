@@ -207,6 +207,37 @@ end
 end
 
 # ---------------------------------------------------------------------------
+# 6b. FFT (NMRProcessor1D)
+# ---------------------------------------------------------------------------
+@testset "FFT" begin
+    n  = 64
+    dt = 0.01
+    t  = range(0.0, step=dt, length=n)
+    v  = NMRflux.SpectData(ComplexF64.(sin.(2pi*5 .* t)), (t,))
+
+    fft1d = FFT(dim=1)
+    sp = fft1d(v)
+
+    @test length(sp) == n
+    @test eltype(sp.dat) == ComplexF64
+
+    # frequency axis matches the Nyqvist range, symmetric around 0
+    Δf = 1.0/dt
+    @test collect(coords(sp,1)) ≈ collect(range(-Δf/2, Δf/2, length=n))
+
+    # generalizes correctly to N-dimensional SpectData via mapslices:
+    # the transformed dimension's coordinate updates, others are untouched
+    A = NMRflux.SpectData(reshape(ComplexF64.(1:n*3), n, 3), (t, [1.0,2.0,3.0]))
+    B = fft1d(A)
+    @test size(B) == size(A)
+    @test coords(B,2) == coords(A,2)
+    @test collect(coords(B,1)) ≈ collect(range(-Δf/2, Δf/2, length=n))
+    for j in 1:3
+        @test B.dat[:,j] == fft1d(A[:,j]).dat
+    end
+end
+
+# ---------------------------------------------------------------------------
 # 7. Apodize
 # ---------------------------------------------------------------------------
 @testset "Apodize" begin
@@ -233,16 +264,19 @@ end
     sp, params, _ = bruker_spectrum()
 
     # identity phase (ph0=0, ph1=0)
-    pc0 = PhaseCorrect(0.0, 0.0, 1)
+    pc0 = PhaseCorrect(ph0=0.0, ph1=0.0, dim=1)
     sp0 = pc0(sp)
     @test all(sp0.dat .≈ sp.dat)
     @test coords(sp0,1) === coords(sp,1)
 
     # ph0=pi negates the real part of a purely real synthetic signal
     v = NMRflux.SpectData(ones(ComplexF64, 100), (range(0.0,1.0,100),))
-    pc_pi = PhaseCorrect(pi, 0.0, 1)
+    pc_pi = PhaseCorrect(ph0=pi, dim=1)
     vr = pc_pi(v)
     @test all(real.(vr.dat) .≈ -1.0)
+
+    # no-argument constructor defaults to identity too
+    @test PhaseCorrect() == PhaseCorrect(ph0=0.0, ph1=0.0, dim=1)
 end
 
 # ---------------------------------------------------------------------------
@@ -251,7 +285,7 @@ end
 @testset "Derivative" begin
     # derivative of a constant synthetic signal is (approximately) zero
     v = NMRflux.SpectData(ones(ComplexF64, 200), (range(0.0, 1.0, 200),))
-    der = Derivative(1)
+    der = Derivative(dim=1)
     dv  = der(v)
     @test length(dv) == length(v)
     @test coords(dv,1) === coords(v,1)
@@ -274,7 +308,7 @@ end
     n   = 100
     inc = 1.0/(n-1)
     v   = NMRflux.SpectData(ones(ComplexF64, n), (range(0.0, 1.0, n),))
-    int = Integral(1)
+    int = Integral(dim=1)
     iv  = int(v)
 
     @test length(iv) == n
@@ -298,8 +332,8 @@ end
     n = 2^16
     zf  = ZeroFill([n])
     ft  = FourierTransform([n],[1])
-    pc  = PhaseCorrect(0.80pi, 2pi*0.00172, 1)
-    bc  = MedianBaselineCorrect(1, wdw=1024)
+    pc  = PhaseCorrect(ph0=0.80pi, ph1=2pi*0.00172)
+    bc  = MedianBaselineCorrect(dim=1, wdw=1024)
 
     sp  = d |> zf |> ft |> pc |> bc
 
@@ -316,7 +350,7 @@ end
     n   = 2^15   # must be >= raw FID length (~32693)
     zf  = ZeroFill([n])
     ft  = FourierTransform([n],[1])
-    apc = AutoPhaseCorrectChen(1; verbose=false)
+    apc = AutoPhaseCorrectChen(dim=1, verbose=false)
 
     sp  = d |> zf |> ft |> apc
 
@@ -341,7 +375,7 @@ end
     vals = ComplexF64[ 1.0 / (1.0 + ((x - peak_pos)/0.05)^2) for x in crd ]
     sp   = NMRflux.SpectData(vals, (crd,))
 
-    pa  = PeakAlign(1, readpos, wdw)
+    pa  = PeakAlign(dim=1, readpos=readpos, wdw=wdw)
     spa = pa(sp)
 
     aligned_max_pos = coords(spa,1)[argmax(abs.(spa.dat))]
@@ -369,8 +403,8 @@ end
     @test all(sp_pipe.dat .≈ sp_chain.dat)
 
     # full end-to-end pipeline on Bruker data
-    pc = PhaseCorrect(0.80pi, 2pi*0.00172, 1)
-    bc = MedianBaselineCorrect(1, wdw=512)
+    pc = PhaseCorrect(ph0=0.80pi, ph1=2pi*0.00172)
+    bc = MedianBaselineCorrect(dim=1, wdw=512)
     sp_full = d |> zf |> ft |> pc |> bc
 
     @test isa(sp_full, NMRflux.SpectData)

@@ -15,9 +15,10 @@ ENV["GKSwstype"] = "100"   # force GR (Plots.jl backend) into headless mode, so
                             # rendering plots for the docs doesn't pop up a GUI window
 
 using Pkg
-Pkg.activate(joinpath(@__DIR__, ".."))   # activate the package's main Project.toml,
-                                         # which has all of NMRflux's deps + Documenter.
-                                         # Lets `julia docs/make.jl` work from any cwd.
+Pkg.activate(@__DIR__)   # activate docs/Project.toml, which has Documenter, Plots (for
+                         # the @example blocks that plot), and NMRflux itself via
+                         # [sources]. Lets `julia docs/make.jl` work from any cwd.
+Pkg.instantiate()
 
 using NMRflux
 using Documenter

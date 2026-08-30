@@ -49,7 +49,7 @@ Here is a minimal example of a processing pipeline:
 Processing = Chain(
     ZeroFill([2^16]),
     FourierTransform([2^16],[1]),
-    AutoPhaseCorrectChen(1)
+    AutoPhaseCorrectChen(dim=1)
 )
 
 proc = Processing(data_td / 1e10 )
@@ -76,16 +76,16 @@ dt = step(data_td.coord[1])
 Processing = Chain(
     ZeroFill([2^16]),
     Apodize([0.5π]),
-    DigitalFilter(NMRflux.BandReject(-0.0025,0.005,1024),1),
+    DigitalFilter(NMRflux.BandReject(-0.0025,0.005,1024); dim=1),
     FourierTransform([2^16],[1]),
     PhaseCorrect(0.0,2pi*1024*dt,1),
-    AutoPhaseCorrectChen(1),
-    MedianBaselineCorrect(1,wdw=2048)
+    AutoPhaseCorrectChen(dim=1),
+    MedianBaselineCorrect(dim=1,wdw=2048)
 )
 
 proc = Processing(data_td / 1e10 )
 
-integral = proc |> Integral(1)
+integral = proc |> Integral(dim=1)
 
 plot(proc.coord[1]/700 .+ 4.78, real.(proc),xaxis=:flip, xlims=[-0.5,9.0],label="Spectrum", xlabel="Chemical Shift (ppm)")
 plot!(proc.coord[1]/700 .+ 4.78, real(integral ) ./20 , xaxis=:flip,label="Integral")

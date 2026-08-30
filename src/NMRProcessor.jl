@@ -32,6 +32,7 @@ Chain(fs::Vararg{Function}) = reduce(∘, reverse(fs))
 # TODO: Clean up API according to the following principles:
 # 1. Argument structure of NMRProcessors:
 #     - Dimension should be a keyword argument `dim` with default value 1
+#     - Other parameters should be keyword arguments with default values, if possible
 # 2. Whenever possible, functionality should be provided as NMRProcessor1D (as opposed to the more general NMRProcessor).
 
 import FFTW
@@ -127,7 +128,7 @@ end
 
 
 @doc raw"""
-    function CoordMap(f::Function, dim::Integer)
+    function CoordMap(f::Function; dim::Integer=1)
 
 returns a processor that replaces the `dim`-th coordinate of a `SpectData` by
 `f.(coord)`, i.e., applies `f` to each element of that coordinate vector. The
@@ -143,6 +144,10 @@ spectrum_ppm = hz_to_ppm(spectrum)
 struct CoordMap <: NMRProcessor
     f::Function
     dim::Int64
+end
+
+function CoordMap(f::Function; dim::Integer=1)
+    return CoordMap(f,dim)
 end
 
 function (cm::CoordMap)(A::SpectData{T,N}) where {T,N}
@@ -162,13 +167,59 @@ should be applied to.
 abstract type NMRProcessor1D <: NMRProcessor end
 
 function (np1d::NMRProcessor1D)(A::SpectData{T,N}) where {T,N}
-    return SpectData(mapslices(np1d,A,dims=np1d.dim),A.coord)
+    return mapslices(np1d, A; dims=np1d.dim)
 end
 
+@doc raw"""
+    function FFT(; dim::Integer=1)
+
+returns a processor that computes the Fourier transform of a spectrum along
+the dimension `dim` (default `1`), via `FFTW.fft` followed by `FFTW.fftshift`
+so that zero frequency appears in the centre. The coordinate along `dim` is
+replaced by a frequency axis, based on the Nyqvist theorem: for a coordinate
+with `n` points and step `dt`, the new coordinate runs from `-1/(2dt)` to
+`1/(2dt)`.
+
+Unlike `FourierTransform`, `FFT` requires no pre-built plan and no target
+size — as an `NMRProcessor1D`, it applies to a `SpectData` of any
+dimensionality via `mapslices`, transforming only `dim` and leaving all other
+dimensions (data and coordinates) untouched.
+"""
+struct FFT <: NMRProcessor1D
+    dim::Int64
+end
+
+function FFT(; dim::Integer=1)
+    return FFT(dim)
+end
+
+function (fft::FFT)(A::SpectData{T,1}) where {T<:Number}
+    Δf = 1.0/step(A.coord[1])
+    newcoord = range(-Δf/2,Δf/2,length=length(A.coord[1]))
+    return SpectData(FFTW.fftshift(FFTW.fft(A.dat)),(newcoord,))
+end
+
+
+@doc raw"""
+    function PhaseCorrect(; ph0::Real=0.0, ph1::Real=0.0, dim::Integer=1)
+
+returns a processor that applies zero- and first-order phase correction to a
+spectrum along the dimension `dim` (default `1`), multiplying it by
+`exp(im*ph0) * exp(im*ph1*f)`, where `f` is the coordinate of that dimension.
+With the default `ph0=ph1=0.0`, the processor is the identity.
+
+- `ph0`: zero order phase, in radians — a uniform rotation applied to every point.
+- `ph1`: first order phase, in radians per unit of the coordinate (e.g. radians
+  per Hz for a frequency-domain spectrum) — a linear phase ramp across the axis.
+"""
 struct PhaseCorrect <: NMRProcessor1D
     ph0::Float64
     ph1::Float64
     dim::Int32
+end
+
+function PhaseCorrect(; ph0::Real=0.0, ph1::Real=0.0, dim::Integer=1)
+    return PhaseCorrect(Float64(ph0), Float64(ph1), dim)
 end
 
 function (pc::PhaseCorrect)(x::SpectData{T,1}) where {T<:Number}
@@ -176,6 +227,19 @@ function (pc::PhaseCorrect)(x::SpectData{T,1}) where {T<:Number}
     return x.*c
 end
 
+@doc raw"""
+    function MedianBaselineCorrect(; dim::Integer=1, wdw::Integer=4096, stp::Integer=32)
+
+returns a processor that subtracts a slowly varying baseline from the real
+part of a spectrum along the dimension `dim` (default `1`), following the
+algorithm of M. S. Friedrichs, *Journal of Biomolecular NMR*, **5** (1995)
+147-153.
+
+- `wdw`: half width, in points, of the local window used to estimate the
+  baseline from local extrema; also the half width at which the Gaussian
+  smoothing kernel is truncated.
+- `stp`: accepted and stored, but not currently used by the implementation.
+"""
 struct MedianBaselineCorrect <: NMRProcessor1D
     dim::Int64
     wdw::Int64
@@ -183,7 +247,7 @@ struct MedianBaselineCorrect <: NMRProcessor1D
     gauss::Vector{Float64}
 end
 
-function MedianBaselineCorrect(dim::Integer;wdw=4096, stp=32)
+function MedianBaselineCorrect(; dim::Integer=1, wdw::Integer=4096, stp::Integer=32)
     g=exp.(-25*((-wdw:wdw)./wdw).^2)
     g=g/sum(g)
     return MedianBaselineCorrect(dim,wdw,stp,g)
@@ -246,37 +310,43 @@ end
 
 
 @doc raw"""
-    function Derivative(dim::Integer)
+    function Derivative(; dim::Integer=1)
 
-returns a processor that computes the first derivative of a spectrum along the dimension `dim`.
+returns a processor that computes the first derivative of a spectrum along the dimension `dim` (default `1`).
 """
-struct Derivative <: NMRProcessor1D 
+struct Derivative <: NMRProcessor1D
     dim::Int64
+    Derivative(; dim::Integer=1) = new(dim)
 end
 
 function (der::Derivative)(spect::SpectData{T,1}) where {T<:Number}
     s=spect.dat
-    inc=step(spect.coord[1])
-    d = 1.0/12*(8*[s[2:end];0]-8*[0;s[1:(end-1)]] - [s[3:end];0;0] + [0;0;s[1:(end-2)]] )/inc
+    x=spect.coord[1]
+    dx = diff(x)
+    inc = [dx[1]; dx]   # reuse the first spacing at the leading edge, instead of wrapping around
+    d = 1.0/12*(8*[s[2:end];0]-8*[0;s[1:(end-1)]] - [s[3:end];0;0] + [0;0;s[1:(end-2)]] ) ./ inc
     return SpectData(d, spect.coord)
 end
 
 
 @doc raw"""
-    function Integral(dim::Integer)
+    function Integral(; dim::Integer=1)
 
-returns a processor that computes the integral of a spectrum along the dimension `dim`.
+returns a processor that computes the integral of a spectrum along the dimension `dim` (default `1`).
 """
 struct Integral <: NMRProcessor1D
     dim::Int64
+    Integral(; dim::Integer=1) = new(dim)
 end
 
 function (int::Integral)(spect::SpectData{T,1}) where {T<:Number}
     s=spect.dat
-    inc=step(spect.coord[1])
-    d = cumsum(s)*inc
+    x=spect.coord[1]
+    dx = diff(x)
+    inc = [dx[1]; dx]   # reuse the first spacing at the leading edge, instead of wrapping around
+    d = cumsum(s .* inc)
     return SpectData(d, spect.coord)
-end 
+end
 
 
 ent(x) = -x*log(x)
@@ -308,17 +378,17 @@ struct AutoPhaseCorrectChen <: NMRProcessor1D
 end
 
 @doc raw"""
-    function AutoPhaseCorrectChen(dim::Integer;verbose=false,γ=0.0)
+    function AutoPhaseCorrectChen(; dim::Integer=1, verbose::Bool=false, γ::Real=1.0e-5)
 
 returns a processor that performs automatic phase correction of a spectrum along
-the dimension `dim` using the minimum entropy algorithm by Chen et al. in
+the dimension `dim` (default `1`) using the minimum entropy algorithm by Chen et al. in
 *Journal of Magnetic Resonance* **158** (2002) 164–168. The parameter `γ` can be
 used to add a penalty term to the optimisation target, which penalises negative
 peaks in the spectrum. This can be useful to avoid overcorrection in noisy
 spectra.
 """
-function AutoPhaseCorrectChen(dim::Integer;verbose=false,γ=1.0e-5)
-    return AutoPhaseCorrectChen(dim,verbose,γ)
+function AutoPhaseCorrectChen(; dim::Integer=1, verbose::Bool=false, γ::Real=1.0e-5)
+    return AutoPhaseCorrectChen(dim,verbose,Float64(γ))
 end
 
 # penalty(x) computes the sum of squares of all negative points in x
@@ -329,13 +399,13 @@ end
 
 # this is the minimisation target for automatic phase correction
 function goalfun(x,spect,γ)
-    pc = PhaseCorrect(x[1],x[2]/1000,1)
+    pc = PhaseCorrect(ph0=x[1], ph1=x[2]/1000)
     c = pc(spect) 
     return entropy(c)+γ*penalty(real.(c.dat));
 end
 
 function (apc::AutoPhaseCorrectChen)(spect::SpectData{T,1}) where {T<:Number}
-    dspect = Derivative(1)(spect)
+    dspect = Derivative()(spect)
     # do a 1D optimisation of the zero-order pc first 
     res0  = Optim.optimize(x->goalfun([x[1],0.0],dspect,apc.γ),-pi,pi,Optim.Brent());
     
@@ -351,18 +421,18 @@ function (apc::AutoPhaseCorrectChen)(spect::SpectData{T,1}) where {T<:Number}
                           g_tol=1.0e-8)
         );
     if apc.verbose print(result) end;
-    pc=PhaseCorrect( Optim.minimizer(result)[1], Optim.minimizer(result)[2]/1000,1);
+    pc=PhaseCorrect(ph0=Optim.minimizer(result)[1], ph1=Optim.minimizer(result)[2]/1000);
     scorr = pc(spect);
   return scorr ;
 end
 
 
 @doc raw"""
-    function PeakAlign(dim::Integer, readpos::Float64, wdw::Integer)
+    function PeakAlign(; dim::Integer=1, readpos::Real, wdw::Integer)
 
-returns a processor that aligns a spectrum along the dimension `dim` to a
-specific position `readpos`.  It works by finding a maximum in the spectrum within a window `wdw`
-that
+returns a processor that aligns a spectrum along the dimension `dim`
+(default `1`) to a specific position `readpos`.  It works by finding a
+maximum in the spectrum within a window `wdw` that
 is closest to `readpos`, and then shifting the spectrum such that this maximum
 is exactly at `readpos`. This can be useful to align spectra to a reference
 peak, e.g., TMS.
@@ -371,6 +441,7 @@ struct PeakAlign <: NMRProcessor1D
     dim::Int64
     readpos::Float64
     wdw::Int64
+    PeakAlign(; dim::Integer=1, readpos::Real, wdw::Integer) = new(dim, Float64(readpos), wdw)
 end
 
 function (pa::PeakAlign)(spect::SpectData{T,1}) where {T<:Number}
@@ -382,10 +453,18 @@ function (pa::PeakAlign)(spect::SpectData{T,1}) where {T<:Number}
     return SpectData(newdat, (spect.coord[1],))
 end
 
+@doc raw"""
+    function DigitalFilter(b::Vector{ComplexF64}; dim::Integer=1)
+
+returns a processor that applies a digital FIR filter with coefficients `b`
+along the dimension `dim` (default `1`), via `DSP.filt`. The coefficients
+`b` can be produced by `BandReject` or `BandPass`.
+"""
 struct DigitalFilter <: NMRProcessor1D
     b::Vector{ComplexF64}
     # a::Vector{Float64}
     dim::Int64
+    DigitalFilter(b::Vector{ComplexF64}; dim::Integer=1) = new(b, dim)
 end
 
 import DSP

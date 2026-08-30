@@ -90,6 +90,45 @@ The second form returns the coordinate of the `k`-th dimension.
 coords(S::SpectData) = S.coord
 coords(S::SpectData,k::Integer) = S.coord[k]
 
+@doc raw"""
+    function mapslices(f, A::SpectData{T,N}; dims::Integer) where {T,N}
+
+Coordinate-aware version of `Base.mapslices` for `SpectData`. Like
+`Base.mapslices`, `f` is applied to each 1D slice of `A` along `dims`.
+Unlike `Base.mapslices`, `f` is expected to return a `SpectData{T2,1}` (as
+every `NMRProcessor1D` functor does) rather than a bare vector, and the
+coordinate that `f` assigns to that slice becomes the `dims`-th coordinate
+of the result. This matters for processors such as a Fourier transform,
+which replace the coordinate (e.g. time -> frequency) as well as the data;
+plain `Base.mapslices` has no way to carry that coordinate change back into
+the reassembled `SpectData`, since it only ever sees plain array data.
+
+All slices are assumed to produce the same coordinate along `dims`, since
+that coordinate is generally derived only from the input coordinate along
+`dims` (e.g. its sampling interval), which is the same for every slice; the
+first slice's result is what determines the output size and coordinate.
+
+Only single-dimension slicing is supported (`dims` must be an `Integer`),
+matching how `NMRProcessor1D` processors are defined.
+"""
+function Base.mapslices(f, A::SpectData{T,N}; dims::Integer) where {T,N}
+    outerdims = ntuple(k -> k == dims ? 1 : size(A,k), N)
+    newdat = nothing
+    newcoord_d = nothing
+    for ci in CartesianIndices(outerdims)
+        idx = ntuple(k -> k == dims ? Colon() : ci[k], N)
+        result = f(A[idx...])
+        if newdat === nothing
+            newsize = ntuple(k -> k == dims ? length(result) : size(A,k), N)
+            newdat = Array{eltype(result),N}(undef, newsize...)
+            newcoord_d = coords(result,1)
+        end
+        newdat[idx...] = result.dat
+    end
+    newcoord = ntuple(k -> k == dims ? newcoord_d : A.coord[k], N)
+    return SpectData(newdat, newcoord)
+end
+
 function SpectData(A::AbstractArray)
     sz=size(A)
     coord=map(x->1:x,sz)

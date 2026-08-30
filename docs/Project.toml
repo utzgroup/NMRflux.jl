@@ -1,0 +1,10 @@
+[deps]
+Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+NMRflux = "d25eb878-a83b-4e0c-a1bb-544741aeade2"
+Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
+
+[sources]
+NMRflux = {path = ".."}
+
+[compat]
+julia = "1.11"

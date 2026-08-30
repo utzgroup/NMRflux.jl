@@ -136,7 +136,7 @@ pipeline = Chain(
     Apodize([0.5]),
     FourierTransform([N], [1]; fftshift = true),
     PhaseCorrect(0.0, 0.0, 1),
-    NMRflux.MedianBaselineCorrect(1; wdw = 256)
+    NMRflux.MedianBaselineCorrect(dim=1, wdw = 256)
 )
 
 spectrum = pipeline(fid)

@@ -197,7 +197,7 @@ ph1_guess = 2pi*0.00175
 
 pc_guess = PhaseCorrect(ph0_guess, ph1_guess, 1)
 
-apc = NMRflux.AutoPhaseCorrectChen(1, verbose=false, γ=0.0e-5)
+apc = NMRflux.AutoPhaseCorrectChen(dim=1, verbose=false, γ=0.0e-5)
 data_p = data_td_joel |> zf |> ap |> ft |> pc_guess |> apc ;
 
 f_apc = data_p.coord[1]
@@ -217,7 +217,7 @@ The automatically corrected spectrum should still be inspected visually. This is
 For example, a stronger penalty can be used as follows:
 
 ```@example joelEg
-apc_stronger_penalty = NMRflux.AutoPhaseCorrectChen(1, verbose=false, γ=1.0e-4)
+apc_stronger_penalty = NMRflux.AutoPhaseCorrectChen(dim=1, verbose=false, γ=1.0e-4)
 data_fd_joel_zf_ap_apc_penalty = apc_stronger_penalty(data_p)
 
 eltype(data_fd_joel_zf_ap_apc_penalty.dat), ndims(data_fd_joel_zf_ap_apc_penalty.dat)
@@ -233,15 +233,15 @@ After phase correction, spectra often exhibit slowly varying offsets or slopes i
 
 The processor is constructed as:
 ```@julia
-NMRflux.MedianBaselineCorrect(dim; wdw=2<<12)
+NMRflux.MedianBaselineCorrect(; dim=1, wdw=2<<12)
 ```
 where:
-- `dim`: dimension along which baseline correction is performed (typically 1 for 1D spectra)
+- `dim`: dimension along which baseline correction is performed (default `1`)
 - `wdw`: half width of the local window in points (controls the "smoothness" scale of the baseline)
 
 Example: Continuing from the previous section, we start from the phased frequency domain spectrum `data_fd_joel_zf_ap_pc`:
 ```@example joelEg
-mbc = NMRflux.MedianBaselineCorrect(1; wdw=2<<12) # baseline correction along frequency dimension
+mbc = NMRflux.MedianBaselineCorrect(dim=1, wdw=2<<12) # baseline correction along frequency dimension
 data_p = data_td_joel |> zf |> ap |> ft |> pc |> apc |> mbc;
 
 ```
@@ -401,12 +401,12 @@ savefig("JEOL_fd_zf_ap_pc_plot.svg"); nothing # hide
 
 ## 7. Baseline correction
 
-`MedianBaselineCorrect(dim; wdw=4096, stp=32)` estimates a slowly varying baseline from the local extrema of the real part, smooths it with a Gaussian kernel, and subtracts it. The method follows Friedrichs, *J. Biomol. NMR* **5** (1995), 147-153. `wdw` is the half width in points of the median window, and also the half width at which the Gaussian kernel is truncated. The standard deviation of that kernel is `wdw/sqrt(50)`, roughly a seventh of the truncation width. `stp` is accepted and stored but the current implementation does not use it.
+`MedianBaselineCorrect(; dim=1, wdw=4096, stp=32)` estimates a slowly varying baseline from the local extrema of the real part, smooths it with a Gaussian kernel, and subtracts it. The method follows Friedrichs, *J. Biomol. NMR* **5** (1995), 147-153. `wdw` is the half width in points of the median window, and also the half width at which the Gaussian kernel is truncated. The standard deviation of that kernel is `wdw/sqrt(50)`, roughly a seventh of the truncation width. `stp` is accepted and stored but the current implementation does not use it.
 
 The processor keeps the real part and drops the imaginary one, so its output is real valued. Run it after any step that still needs the complex spectrum.
 
 ```@example JEOLEg
-mbc = MedianBaselineCorrect(1; wdw=2048)
+mbc = MedianBaselineCorrect(dim=1, wdw=2048)
 data_fd_JEOL_zf_ap_pc_bc = mbc(data_fd_JEOL_zf_ap_pc)
 
 size(data_fd_JEOL_zf_ap_pc_bc.dat)
@@ -433,7 +433,7 @@ savefig("JEOL_fd_zf_ap_pc_bc_plot.svg"); nothing # hide
 
 ## 8. Automatic phase correction
 
-`AutoPhaseCorrectChen(dim; verbose=false, γ=1.0e-5)` estimates both phase parameters by minimising the entropy of the first derivative of the real part, following Chen et al., *J. Magn. Reson.* **158** (2002), 164-168. It runs a one dimensional search over `ph0` first, then refines both parameters together. The `γ` parameter adds a penalty on the negative values of the phase corrected derivative, which helps in noisy spectra. Setting `γ=0.0` switches the penalty off. The method works best when it only has to refine an approximate manual correction, so apply a rough `PhaseCorrect` first.
+`AutoPhaseCorrectChen(; dim=1, verbose=false, γ=1.0e-5)` estimates both phase parameters by minimising the entropy of the first derivative of the real part, following Chen et al., *J. Magn. Reson.* **158** (2002), 164-168. It runs a one dimensional search over `ph0` first, then refines both parameters together. The `γ` parameter adds a penalty on the negative values of the phase corrected derivative, which helps in noisy spectra. Setting `γ=0.0` switches the penalty off. The method works best when it only has to refine an approximate manual correction, so apply a rough `PhaseCorrect` first.
 
 ```@example JEOLEgAPC
 using NMRflux
@@ -465,7 +465,7 @@ data_pc_guess = pc_guess(data_fd_JEOL_zf_ap)
 
 # the manual guess above is already close and this spectrum has good SNR,
 # so the entropy term alone is enough here
-apc = AutoPhaseCorrectChen(1; verbose=false, γ=0.0)
+apc = AutoPhaseCorrectChen(dim=1, verbose=false, γ=0.0)
 
 data_apc = apc(data_pc_guess)
 
@@ -494,25 +494,25 @@ Always look at the result. Strong baseline distortion, a large residual solvent 
 
 Three further processors are exported and follow the same calling pattern. All three run below against the baseline corrected spectrum from section 7, so the documentation build exercises them every time it runs.
 
-- `Derivative(dim)` returns the first derivative along `dim` from a five point central difference stencil. The first two and last two points fall outside the stencil, so they come back as edge artefacts.
+- `Derivative(; dim=1)` returns the first derivative along `dim` from a five point central difference stencil. The first two and last two points fall outside the stencil, so they come back as edge artefacts.
 
-- `Integral(dim)` returns the running integral along `dim`, accumulated point by point with the rectangle rule. The result is a cumulative trace the same length as the input. Getting a peak area from it means taking the difference between two points, so treat it as raw material for an integration workflow.
+- `Integral(; dim=1)` returns the running integral along `dim`, accumulated point by point with the rectangle rule. The result is a cumulative trace the same length as the input. Getting a peak area from it means taking the difference between two points, so treat it as raw material for an integration workflow.
 
-Both read the sample spacing with `step`, so the coordinate of that dimension has to be a range.
+Both compute the local sample spacing directly from the coordinate, so it no longer has to be a uniform range.
 
 ```@example JEOLEg
-deriv = Derivative(1)(data_fd_JEOL_zf_ap_pc_bc)
-cumulative = Integral(1)(data_fd_JEOL_zf_ap_pc_bc)
+deriv = Derivative(dim=1)(data_fd_JEOL_zf_ap_pc_bc)
+cumulative = Integral(dim=1)(data_fd_JEOL_zf_ap_pc_bc)
 
 (size(deriv.dat), size(cumulative.dat))
 ```
 
-- `PeakAlign(dim, readpos, wdw)` searches the `wdw` points either side of `readpos`, takes the largest absolute value it finds there, and shifts the spectrum cyclically so that feature lands on `readpos`. This is the usual way to bring a set of spectra onto a common reference signal such as TMS.
+- `PeakAlign(; dim=1, readpos, wdw)` searches the `wdw` points either side of `readpos`, takes the largest absolute value it finds there, and shifts the spectrum cyclically so that feature lands on `readpos`. This is the usual way to bring a set of spectra onto a common reference signal such as TMS.
 
 The search window is not clipped at the array bounds, so keep `readpos` at least `wdw` points away from either end of the spectrum. The shift is computed in whole points, so the aligned feature lands within one point of `readpos`.
 
 ```@example JEOLEg
-aligned = PeakAlign(1, 0.0, 500)(data_fd_JEOL_zf_ap_pc_bc)
+aligned = PeakAlign(dim=1, readpos=0.0, wdw=500)(data_fd_JEOL_zf_ap_pc_bc)
 size(aligned.dat)
 ```
 
@@ -536,7 +536,7 @@ p = Chain(
     Apodize([0.5]),
     FourierTransform([N_new], [1]; fftshift=true),
     PhaseCorrect(-0.55pi, 2pi * 0.00175, 1),
-    MedianBaselineCorrect(1; wdw=2048),
+    MedianBaselineCorrect(dim=1, wdw=2048),
 )
 
 JEOL_data_processed = p(data_td_JEOL)
