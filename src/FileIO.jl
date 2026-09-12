@@ -2016,27 +2016,43 @@ function reshapeJEOL(header, params, data)
     # Split the flat buffer into equally-sized sections
     secs = [data[(k-1)*section_sz+1 : k*section_sz] for k in 1:nsections]
 
-    # Combine sections into a complex N-D array.
-    # For section s (1-based), bits = s-1 encodes which axes are imaginary:
-    # bit (k-1) = 1 → imag_axes[k] contributes factor -im.
-    result = zeros(ComplexF64, npts...)
-    for s in 1:nsections
-        bits   = s - 1
-        factor = prod(
-            (bits >> (k-1)) & 1 == 1 ? (-im) : ComplexF64(1.0)
-            for k in 1:length(imag_axes);
-            init = ComplexF64(1.0)
-        )
-        result .+= factor .* reshape(secs[s], npts...)
-    end
+    
+    if(header["dataFormat"]=="One_D")
+        # Combine sections into a complex N-D array.
+        # For section s (1-based), bits = s-1 encodes which axes are imaginary:
+        # bit (k-1) = 1 → imag_axes[k] contributes factor -im.
+        result = zeros(ComplexF64, npts...)
+        for s in 1:nsections
+            bits   = s - 1
+            factor = prod(
+                (bits >> (k-1)) & 1 == 1 ? (-im) : ComplexF64(1.0)
+                for k in 1:length(imag_axes)
+            )
+            result .+= factor .* reshape(secs[s], npts...)
+        end
 
-    # Coordinate range for each active axis (units as stored in the header,
-    # typically seconds for time-domain data).
-    # Return as (array, coords) so the caller (in NMRflux scope) can wrap
-    # the result in SpectData — FileIO does not import NMRflux types.
-    coords = tuple([range(astart[k], astop[k], npts[k]) for k in 1:ndims]...)
 
-    return result, coords
+        # Coordinate range for each active axis (units as stored in the header,
+        # typically seconds for time-domain data).
+        # Return as (array, coords) so the caller (in NMRflux scope) can wrap
+        # the result in SpectData — FileIO does not import NMRflux types.
+        coords = tuple([range(astart[k], astop[k], npts[k]) for k in 1:ndims]...)
+
+        return result, coords
+
+    elseif(header["dataFormat"]=="Three_D")
+        # data is stored in 32x32 blocks 
+        nblocks = length(data) ÷ (32*32) ÷ nsections
+        ndarray = reshape(data, (32,32, nblocks, nsections ))
+        sections = [ndarray[:,:,b,s] for b in 1:nblocks, s in 1:nsections]
+        result = reshape(vcat(sections...), npts...,nsections)
+        coords = tuple([range(astart[k], astop[k], npts[k]) for k in 1:ndims]...,1:nsections)
+
+        return result, coords
+
+    else 
+        error("JEOL data format $(header["dataFormat"]) not yet supported")
+    end 
 end
 
 end # module FileIO

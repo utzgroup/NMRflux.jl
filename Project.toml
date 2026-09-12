@@ -1,7 +1,7 @@
 name = "NMRflux"
 uuid = "d25eb878-a83b-4e0c-a1bb-544741aeade2"
-version = "1.0.0-DEV"
-authors = ["Marcel Utz <marcel.utz@gmx.net> and contributors"]
+version = "0.3.0"
+authors = ["Marcel Utz <marcel.utz@kit.edu>, Manaz Kaleel <manaz.kaleel@kit.edu>"]
 
 [deps]
 Arpack = "7d9fca2a-8960-54d3-9f78-7d1dccf2cb97"

@@ -24,16 +24,15 @@ using NMRflux
 using NMRflux.Examples
 using Plots: plot, plot!, savefig
 
-data_jeol = NMRflux.Examples.Data["Spheroid culture medium"]
-jdf_file = joinpath(data_jeol["path"], "yp-5-fu-2.5-100.jdf")
-params_JEOL, data_td = NMRflux.load(jdf_file, :JEOL)
+data_bruker = NMRflux.Examples.Data["HCC cell culture media spectra"]
+params_bruker, data_td = NMRflux.load(joinpath(data_bruker["path"], "10"), :Bruker)
 
-plot(coords(data_td, 1), real.(data_td.dat);
+plot(data_td;
     xlabel = "time / s",
     ylabel = "signal (a.u.)",
     title = "Bruker FID (real part)")
 
-savefig("quickstart_bruker_fid.svg"); nothing
+savefig("quickstart_bruker_fid.svg"); nothing  # hide
 ```
 
 ![](quickstart_bruker_fid.svg)
@@ -47,17 +46,14 @@ Here is a minimal example of a processing pipeline:
 ```@example brukerEg
 
 Processing = Chain(
-    ZeroFill([2^16]),
-    FourierTransformPlan([2^16],[1]),
-    AutoPhaseCorrectChen(dim=1)
+    ZeroFill(SI=2^16),
+    FourierTransform(),
+    AutoPhaseCorrectChen()
 )
 
-proc = Processing(data_td / 1e10 )
+spectrum = Processing(data_td)
 
-plot(proc.coord[1]/700 .+ 4.78, real.(proc),xaxis=:flip,
-xlims=[-0.5,9.0]
-)
-
+plot(spectrum,xaxis=:flip,xlabel="Frequency (Hz)")
 savefig("quickstart_basic_spect.svg") ; nothing # hide
 ```
 ![](quickstart_basic_spect.svg)
@@ -74,21 +70,22 @@ correction (to remove distortions due to probe ringing):
 dt = step(data_td.coord[1])
 
 Processing = Chain(
-    ZeroFill([2^16]),
-    Apodize([0.5π]),
-    DigitalFilter(NMRflux.BandReject(-0.0025,0.005,1024); dim=1),
-    FourierTransformPlan([2^16],[1]),
-    PhaseCorrect(0.0,2pi*1024*dt,1),
-    AutoPhaseCorrectChen(dim=1),
-    MedianBaselineCorrect(dim=1,wdw=2048)
+    ZeroFill(SI=2^16), 
+    Apodize(R=0.5π),
+    DigitalFilter(BandReject(-0.0025,0.005,1024)),  # Digital filter to remove solvent artefact
+    FourierTransform(),
+    PhaseCorrect(ph0=0.0,ph1=2pi*1024*dt),                  # Phase correction
+    AutoPhaseCorrectChen(),                                 # Automatic phase refinement
+    MedianBaselineCorrect(wdw=2048),                        
+    CoordMap(f->f/700.0+4.83)                               # change horizontal axis to ppm scale
 )
 
-proc = Processing(data_td / 1e10 )
+spectrum = Processing(data_td)
 
-integral = proc |> Integral(dim=1)
+integral = spectrum |> Integral(dim=1)
 
-plot(proc.coord[1]/700 .+ 4.78, real.(proc),xaxis=:flip, xlims=[-0.5,9.0],label="Spectrum", xlabel="Chemical Shift (ppm)")
-plot!(proc.coord[1]/700 .+ 4.78, real(integral ) ./20 , xaxis=:flip,label="Integral")
+plot(spectrum,xaxis=:flip, xlims=[-0.5,9.0],label="Spectrum", xlabel="Chemical Shift (ppm)")
+plot!(integral*20 , xaxis=:flip,label="Integral")
 
 savefig("quickstart_processing_pipeline.svg"); nothing # hide
 ```

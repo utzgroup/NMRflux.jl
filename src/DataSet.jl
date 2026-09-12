@@ -31,6 +31,7 @@ import Base.getindex
 import Base.setindex!
 import Base.IndexStyle
 import Base.showarg
+import Base.show
 
 size(S::SpectData) = size(S.dat)
 getindex(S::SpectData, k::Integer) = getindex(S.dat,k)
@@ -38,6 +39,8 @@ setindex!(S::SpectData, v, k::Integer) = setindex!(S.dat,v,k)
 IndexStyle(S::SpectData) = IndexStyle(S.dat)
 
 Base.showarg(io::IO, A::SpectData, toplevel) = print(io, typeof(A), " with coords:", A.coord)
+Base.show(io::IO, ::MIME"text/plain", A::SpectData) = print(io, size(A), " SpectData ", typeof(A.dat), " with coords:", A.coord)
+
 
 ## support broadcasting ------------------------------------------------------
 Base.BroadcastStyle(::Type{<:SpectData}) = Broadcast.ArrayStyle{SpectData}()

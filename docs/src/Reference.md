@@ -26,18 +26,6 @@ NMRflux.extrema
 NMRflux.find_spdta
 ```
 
-### Processors without docstrings
-
-Three exported processors carry no docstring in the source yet, so they cannot appear in the block above. Their signatures are:
-
-```julia
-ZeroFill(SI::Vector{Union{Integer,Colon}})
-Apodize(R::Vector{Union{Real,Colon}})
-PhaseCorrect(ph0::Float64, ph1::Float64, dim::Int32)
-```
-
-`ZeroFill` takes one target size per dimension and pads with zeros; `:` keeps a dimension at its current length. `Apodize` takes one exponential decay rate per dimension and multiplies the data by `exp(-R*t)` along each of them; `:` leaves a dimension untouched. `PhaseCorrect` multiplies dimension `dim` by `exp(i*ph0) * exp(i*ph1*f)`, where `f` is that dimension's coordinate. [Classical Processing Pipeline](DataProcessing.md) works through all three.
-
 ## FileIO API
 
 The vendor readers are exposed through `NMRflux.FileIO`. The parsing helpers that support them are deliberately left out of this reference.

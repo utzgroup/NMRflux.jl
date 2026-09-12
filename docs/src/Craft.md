@@ -1,4 +1,4 @@
-# 1. Sinusoidal Decomposition of FIDs (Craft.jl)
+# Sinusoidal Decomposition of FIDs (Craft.jl)
 `NMRflux.Craft` decomposes an FID into a small set of damped complex sinusoids,
 rather than the continuous spectrum produced by Fourier transformation. Each
 sinusoid is described by a frequency, an amplitude, a phase, and a decay rate

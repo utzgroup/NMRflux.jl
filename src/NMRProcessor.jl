@@ -62,8 +62,8 @@ that size. If the size of the data set changes, a new `FourierTransformPlan`
 must be created for it.
 
 """
-function FourierTransformPlan(SI::Vector,dims::Vector; fftshift=true)
-    dummy=zeros(ComplexF64,SI...)
+function FourierTransformPlan(SI::Vector,dims::Vector; fftshift::Bool=true, dtype::DataType=ComplexF64)
+    dummy=zeros(dtype,SI...)
     plan=FFTW.plan_fft(dummy,dims)
     return( FourierTransformPlan(dims,SI,fftshift,plan))
 end
@@ -455,7 +455,7 @@ struct AutoPhaseCorrectChen <: NMRProcessor1D
 end
 
 @doc raw"""
-    function AutoPhaseCorrectChen(; dim::Integer=1, verbose::Bool=false, γ::Real=1.0e-5)
+    function AutoPhaseCorrectChen(; dim::Integer=1, verbose::Bool=false, γ::Real=0.0)
 
 returns a processor that performs automatic phase correction of a spectrum along
 the dimension `dim` (default `1`) using the minimum entropy algorithm by Chen et al. in
@@ -464,13 +464,13 @@ used to add a penalty term to the optimisation target, which penalises negative
 peaks in the spectrum. This can be useful to avoid overcorrection in noisy
 spectra.
 """
-function AutoPhaseCorrectChen(; dim::Integer=1, verbose::Bool=false, γ::Real=1.0e-5)
+function AutoPhaseCorrectChen(; dim::Integer=1, verbose::Bool=false, γ::Real=0.0)
     return AutoPhaseCorrectChen(dim,verbose,Float64(γ))
 end
 
 # penalty(x) computes the sum of squares of all negative points in x
 function penalty(x)
-    # x /= sum(abs.(x))
+    x /= sum(abs.(x))    # normalize the spectrum to avoid scaling issues
     return sum(k<0.0 ? k*k : 0.0 for k in x)
 end
 

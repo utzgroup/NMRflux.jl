@@ -16,10 +16,6 @@
 !!! note "Scope and applications"
     NMRflux.jl provides the general data, processing, and simulation framework. Application specific workflows can build on these public interfaces without becoming part of the core package. RINSE appears in this documentation as one such demonstrator. It is developed and distributed separately from NMRflux.jl.
 
-## Contents
-
-```@contents
-```
 
 ## Manual outline
 

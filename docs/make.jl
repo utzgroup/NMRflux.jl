@@ -75,6 +75,7 @@ makedocs(
         "Machine learning demonstrator" => [
             "RINSE" => "RINSE.md",
         ],
+        "Release Notes" => "ReleaseNotes.md",
     ],
 
     # For now, don't fail if some docstrings are not yet included in the manual

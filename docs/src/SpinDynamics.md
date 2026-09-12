@@ -107,14 +107,14 @@ using Plots: plot, savefig
 N_NEW = 16384
 
 spectrum = Chain(
-    ZeroFill([N_NEW]),
-    Apodize([5.0]),
-    FourierTransformPlan([N_NEW], [1]; fftshift=true),
+    ZeroFill(SI=N_NEW),
+    Apodize(R=5.0),
+    FourierTransform(),
 )(fid)
 
-plot(coords(spectrum, 1), real.(spectrum.dat);
+plot(spectrum;
     xaxis = :flip,
-    xlims = [0, 3000],
+    xlims = [-3000, 3000],
     xlabel = "frequency / Hz",
     ylabel = "signal (a.u.)",
     title = "Simulated AX spectrum"
@@ -165,7 +165,7 @@ axis_hz  = range(0.0, 3000.0, length=4096)
 
 peaks = SpinSim.PeakSpect(freqs_hz, ints, axis_hz; lw=LINEWIDTH_HZ)
 
-plot(coords(peaks, 1), real.(peaks.dat);
+plot(peaks,
     xaxis = :flip,
     xlabel = "frequency / Hz",
     ylabel = "signal (a.u.)",
