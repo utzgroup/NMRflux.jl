@@ -2001,9 +2001,16 @@ function reshapeJEOL(header, params, data)
     astop  = header["dataAxisStop"][1:ndims]
     types  = header["dataAxisType"][1:ndims]
 
+    nsections = 1   # there is at least one section
+    # If any of the axes are Real_Complex, then we have two sections
+    if !isempty(findall(t -> t == "Real_Complex", types))
+        nsections = 2
+        real_complex = true
+    end
+
     # Which axes contribute a separate imaginary section?
-    imag_axes  = findall(t -> t in ("Complex", "Real_Complex"), types)
-    nsections  = 2^length(imag_axes)
+    imag_axes  = findall(t -> t == "Complex", types)
+    nsections  *= 2^length(imag_axes)
     section_sz = prod(npts)
 
     if length(data) != nsections * section_sz
@@ -2017,7 +2024,7 @@ function reshapeJEOL(header, params, data)
     secs = [data[(k-1)*section_sz+1 : k*section_sz] for k in 1:nsections]
 
     
-    if(header["dataFormat"]=="One_D")
+    if(header["dataFormat"]=="One_D" || header["dataFormat"]=="Two_D")
         # Combine sections into a complex N-D array.
         # For section s (1-based), bits = s-1 encodes which axes are imaginary:
         # bit (k-1) = 1 → imag_axes[k] contributes factor -im.
