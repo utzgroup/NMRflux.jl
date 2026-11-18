@@ -1,6 +1,6 @@
 name = "NMRflux"
 uuid = "d25eb878-a83b-4e0c-a1bb-544741aeade2"
-version = "0.3.0"
+version = "0.3.1"
 authors = ["Marcel Utz <marcel.utz@kit.edu>, Manaz Kaleel <manaz.kaleel@kit.edu>"]
 
 [deps]

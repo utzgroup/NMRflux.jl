@@ -2017,7 +2017,7 @@ function reshapeJEOL(header, params, data)
     secs = [data[(k-1)*section_sz+1 : k*section_sz] for k in 1:nsections]
 
     
-    if(header["dataFormat"]=="One_D")
+    if(header["dataFormat"]=="Two_D")
         # Combine sections into a complex N-D array.
         # For section s (1-based), bits = s-1 encodes which axes are imaginary:
         # bit (k-1) = 1 → imag_axes[k] contributes factor -im.
@@ -2048,6 +2048,7 @@ function reshapeJEOL(header, params, data)
         result = reshape(vcat(sections...), npts...,nsections)
         coords = tuple([range(astart[k], astop[k], npts[k]) for k in 1:ndims]...,1:nsections)
 
+        @show size(result)
         return result, coords
 
     else 
