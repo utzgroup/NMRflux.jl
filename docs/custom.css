@@ -1,0 +1,16 @@
+@media screen and (min-width: 1056px) {
+  #documenter .docs-main {
+    max-width: none !important;
+    margin-left: 20rem;
+    padding-right: 2rem;
+  }
+
+  #documenter .docs-main > article {
+    max-width: none !important;
+  }
+}
+
+#documenter .docs-main img,
+#documenter .docs-main svg {
+  max-width: 100%;
+}
